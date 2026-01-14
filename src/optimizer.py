@@ -57,6 +57,14 @@ class OptimizationConfig:
             self.cloud_reduction_range = [0.0, 0.1, 0.15, 0.2, 0.25]
         if self.onprem_reduction_range is None:
             self.onprem_reduction_range = [0.0, 0.05, 0.1, 0.15]
+            
+        # Ensure uniqueness and sort
+        self.screen_reduction_range = sorted(list(set(self.screen_reduction_range)))
+        self.landline_reduction_range = sorted(list(set(self.landline_reduction_range)))
+        self.laptop_lifespan_extension_range = sorted(list(set(self.laptop_lifespan_extension_range)))
+        self.laptop_refurb_share_range = sorted(list(set(self.laptop_refurb_share_range)))
+        self.cloud_reduction_range = sorted(list(set(self.cloud_reduction_range)))
+        self.onprem_reduction_range = sorted(list(set(self.onprem_reduction_range)))
 
 
 @dataclass

@@ -1177,12 +1177,28 @@ def render_optimization():
             st.markdown("---")
             
             st.markdown("**Key Configuration:**")
-            for device, reduction in scenario.device_reductions.items():
-                if reduction > 0:
-                    st.write(f"- {device} reduction: {reduction*100:.0f}%")
+            col_conf1, col_conf2 = st.columns(2)
             
-            if scenario.cloud_cost_reduction > 0:
-                st.write(f"- Cloud reduction: {scenario.cloud_cost_reduction*100:.0f}%")
+            with col_conf1:
+                for device, reduction in scenario.device_reductions.items():
+                    if reduction > 0:
+                        st.write(f"- {device} reduction: {reduction*100:.0f}%")
+                
+                for device, ext in scenario.lifespan_extensions.items():
+                    if ext > 0:
+                        st.write(f"- {device} lifespan +{ext*100:.0f}%")
+            
+            with col_conf2:
+                for device, mix in scenario.sourcing_mix.items():
+                    refurb = mix.get("refurb", 0.0)
+                    if refurb > 0:
+                        st.write(f"- {device} refurb share: {refurb*100:.0f}%")
+                
+                if scenario.cloud_cost_reduction > 0:
+                    st.write(f"- Cloud reduction: {scenario.cloud_cost_reduction*100:.0f}%")
+                
+                if scenario.onprem_reduction > 0:
+                    st.write(f"- On-prem reduction: {scenario.onprem_reduction*100:.0f}%")
             
             if st.button(f"Add to Scenarios", key=f"add_scenario_{i}"):
                 scenario.name = f"Optimized {i}"
