@@ -311,22 +311,22 @@ def compute_baseline(
         metrics.onprem_co2_annual = equipment_co2 * 0.33
     
     # =========================================================================
-    # Program and end-of-life costs
+    # End-of-life costs (baseline has no program costs - that's an investment)
     # =========================================================================
-    metrics.program_cost_annual = params.program_budget
+    metrics.program_cost_annual = 0.0  # Baseline has no program investment
     metrics.end_of_life_cost_annual = params.end_of_life_cost
     
     # =========================================================================
     # Aggregate totals
     # =========================================================================
     
-    # Total TCO
-    # Formula: TCO = CapexAnn + CostEnergy + CostCloud + ProgramCost + EOLCost
+    # Total TCO (baseline = operational costs only, no program investment)
+    # Formula: TCO = CapexAnn + CostEnergy + CostCloud + EOLCost
+    # Note: Program cost is NOT included in baseline - it's an investment for scenarios
     metrics.total_tco = (
         metrics.total_capex_annual +
         metrics.total_energy_cost_annual +
         metrics.cloud_cost_annual +
-        metrics.program_cost_annual +
         metrics.end_of_life_cost_annual
     )
     

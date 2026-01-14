@@ -758,15 +758,39 @@ def render_scenario_builder():
                 col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    savings = baseline.total_tco - metrics.total_tco
-                    st.metric("TCO", f"€{metrics.total_tco:,.0f}", f"€{savings:+,.0f}")
+                    # Use operational_tco (excludes program cost) for comparison with baseline
+                    savings = baseline.total_tco - metrics.operational_tco
+                    
+                    # Streamlit delta_color:
+                    # - "normal": positive = green, negative = red
+                    # - "inverse": positive = red, negative = green
+                    # 
+                    # We show "-€X" when savings > 0 (costs went down = good)
+                    # Since "-€X" is negative, we need "inverse" to make it GREEN
+                    if savings > 0:
+                        delta_display = f"-€{savings:,.0f}"
+                        delta_color = "inverse"  # Green for negative (down arrow)
+                    else:
+                        delta_display = f"+€{abs(savings):,.0f}"
+                        delta_color = "inverse"  # Red for positive (up arrow)
+                    st.metric("TCO", f"€{metrics.operational_tco:,.0f}", delta_display, delta_color=delta_color)
                 
                 with col2:
-                    co2_reduction = (baseline.total_co2 - metrics.total_co2) / baseline.total_co2 * 100
-                    st.metric("CO₂", f"{metrics.total_co2:,.0f} kg", f"{co2_reduction:+.1f}%")
+                    # CO2 reduction (positive diff = good, we reduced emissions)
+                    co2_diff = baseline.total_co2 - metrics.total_co2
+                    co2_reduction_pct = (co2_diff / baseline.total_co2 * 100) if baseline.total_co2 > 0 else 0
+                    
+                    # Same logic: negative delta = improvement = should be GREEN
+                    if co2_diff > 0:
+                        delta_display = f"-{co2_reduction_pct:.1f}%"
+                        delta_color = "inverse"  # Green for negative (down arrow)
+                    else:
+                        delta_display = f"+{abs(co2_reduction_pct):.1f}%"
+                        delta_color = "inverse"  # Red for positive (up arrow)
+                    st.metric("CO₂", f"{metrics.total_co2:,.0f} kg", delta_display, delta_color=delta_color)
                 
                 with col3:
-                    meets_target = co2_reduction >= params.target_co2_reduction * 100
+                    meets_target = co2_reduction_pct >= params.target_co2_reduction * 100
                     st.metric("Meets Target", "Yes" if meets_target else "No")
                 
                 with col4:

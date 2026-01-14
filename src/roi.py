@@ -48,26 +48,34 @@ def compute_financial_roi(
     Compute financial ROI metrics.
     
     Formulas:
-    - ΔCost = TCO_base - TCO_scenario
-    - ROI_fin = (ΔCost - ProgramCost) / ProgramCost
-    - Payback = ProgramCost / ΔCost
+    - Operational Savings = Baseline TCO - Scenario Operational TCO
+      (Both exclude program investment for fair comparison)
+    - ROI = Operational Savings / Program Investment
+    - Payback = Program Investment / Operational Savings
+    
+    Note: Baseline has no program cost (current state before investment).
+    Scenario operational_tco also excludes program cost for apples-to-apples comparison.
     
     Returns:
         Tuple of (cost_savings, roi_financial, payback_years)
     """
-    # Cost savings
-    cost_savings = baseline.total_tco - scenario.total_tco
+    # Operational savings: how much running costs are reduced
+    # Baseline TCO has no program cost (pre-investment state)
+    # Scenario operational_tco excludes program cost (post-investment running costs)
+    cost_savings = baseline.total_tco - scenario.operational_tco
     
-    # Financial ROI
+    # Financial ROI: return on the program investment
+    # ROI = savings generated per year / annual investment
     if scenario.program_cost_annual > 0:
-        roi_financial = (cost_savings - scenario.program_cost_annual) / scenario.program_cost_annual
+        roi_financial = cost_savings / scenario.program_cost_annual
     else:
         roi_financial = float('inf') if cost_savings > 0 else 0.0
     
-    # Payback period
+    # Payback period: how many years to recover the investment
     if cost_savings > 0:
         payback_years = scenario.program_cost_annual / cost_savings
     else:
+        # If no savings (or negative), payback is infinite
         payback_years = float('inf')
     
     return cost_savings, roi_financial, payback_years

@@ -89,12 +89,15 @@ class ScenarioMetrics:
     cloud_co2_annual: float = 0.0
     onprem_co2_annual: float = 0.0
     
-    # Program costs
+    # Program costs (investment, not operational)
     program_cost_annual: float = 0.0
     end_of_life_cost_annual: float = 0.0
     
-    # Aggregates
-    total_tco: float = 0.0
+    # Aggregates - IMPORTANT DISTINCTION:
+    # - operational_tco: Running costs WITHOUT program investment (for comparing with baseline)
+    # - total_tco: Full TCO INCLUDING program investment (for budgeting)
+    operational_tco: float = 0.0  # Capex + Energy + Cloud + EOL (no program cost)
+    total_tco: float = 0.0       # Operational + Program cost
     total_co2: float = 0.0
 
 
@@ -301,13 +304,19 @@ def compute_scenario(
     # =========================================================================
     # Aggregate totals
     # =========================================================================
-    metrics.total_tco = (
+    
+    # Operational TCO (excludes program investment - for comparing with baseline)
+    # This answers: "What are the running costs after implementing the scenario?"
+    metrics.operational_tco = (
         metrics.total_capex_annual +
         metrics.total_energy_cost_annual +
         metrics.cloud_cost_annual +
-        metrics.program_cost_annual +
         metrics.end_of_life_cost_annual
     )
+    
+    # Full TCO (includes program investment - for budgeting purposes)
+    # This answers: "What is the total cost including the investment?"
+    metrics.total_tco = metrics.operational_tco + metrics.program_cost_annual
     
     metrics.total_co2 = (
         metrics.total_co2_embodied_annual +
