@@ -2,7 +2,7 @@
 
 A strategic decision-support tool helping LVMH evaluate, compare, and prioritize Green IT initiatives by combining financial ROI with environmental impact assessment.
 
-## 🚀 Quick Start for Team
+## Quick Start for Team
 
 ### Prerequisites
 - Python 3.8 or higher installed
@@ -35,7 +35,7 @@ The app will open automatically in your browser at **http://localhost:8501**.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 - **`app.py`**: Main application entry point
 - **`src/`**: Calculation modules (Baseline, Scenarios, Optimization, ROI)
