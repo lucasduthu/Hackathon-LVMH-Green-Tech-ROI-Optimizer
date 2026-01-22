@@ -388,6 +388,14 @@ def render_sidebar():
             format="%d%%"
         ) / 100
         
+        params.onprem_co2_baseline = st.number_input(
+            "On-Prem CO₂ Baseline (kg/year)",
+            value=float(params.onprem_co2_baseline),
+            min_value=0.0,
+            step=1000.0,
+            help="LVMH's on-premises infrastructure emissions. Default assumes 60/20/30 split (Equipment/On-Prem/Cloud)."
+        )
+        
         params.alpha = st.slider(
             "Green ROI Weight (α)",
             min_value=0.0,

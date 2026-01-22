@@ -137,6 +137,9 @@ class GlobalParameters:
     target_co2_reduction: float = 0.20  # 20% reduction target by 2026
     end_of_life_cost: float = 5_000.0  # € per year for disposal partner
     
+    # On-Prem emissions baseline (LVMH uses ~20% of total emissions for on-prem)
+    onprem_co2_baseline: float = 34_000.0  # kg CO₂/year (set to match 60/20/30 split)
+    
     # Screen usage parameters
     screen_hours_on: float = 8.0       # Hours per day screen is active
     screen_hours_sleep: float = 16.0   # Hours per day screen in sleep mode

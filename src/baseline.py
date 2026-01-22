@@ -296,19 +296,10 @@ def compute_baseline(
     cloud_factor = CLOUD_CO2_FACTORS.get(params.cloud_provider, 0.0004)
     metrics.cloud_co2_annual = metrics.cloud_cost_annual * cloud_factor
     
-    # On-prem CO₂ estimation to match LVMH 60/20/30 split
-    # Equipment ≈ 60%, On-prem ≈ 20%, Cloud ≈ 30%
-    # We derive on-prem from the target split
-    equipment_co2 = metrics.total_co2_embodied_annual + metrics.total_co2_use_phase_annual
-    
-    # If cloud is 30% of total, then total = cloud / 0.30
-    # On-prem = total × 0.20 = (cloud / 0.30) × 0.20
-    if metrics.cloud_co2_annual > 0:
-        estimated_total = metrics.cloud_co2_annual / 0.30
-        metrics.onprem_co2_annual = estimated_total * 0.20
-    else:
-        # Fallback: estimate on-prem as 1/3 of equipment CO₂
-        metrics.onprem_co2_annual = equipment_co2 * 0.33
+    # On-prem CO₂ from configurable baseline
+    # LVMH uses 60/20/30 split (Equipment/On-Prem/Cloud)
+    # User can configure actual on-prem emissions in Settings
+    metrics.onprem_co2_annual = params.onprem_co2_baseline
     
     # =========================================================================
     # End-of-life costs (baseline has no program costs - that's an investment)
