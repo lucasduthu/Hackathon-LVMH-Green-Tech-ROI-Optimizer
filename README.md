@@ -43,7 +43,7 @@ The app will open automatically in your browser at **http://localhost:8501**.
 - **`assets/`**: LVMH-branded styling (CSS)
 - **`docs/`**: Detailed documentation
 
-## 🛠 Features
+## Features
 
 1. **Baseline Analysis**: Visualize current IT footprint (TCO + CO₂)
 2. **Scenario Builder**: Model initiatives like laptop lifespan extension
