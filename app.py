@@ -303,12 +303,18 @@ def render_sidebar():
     
     with st.sidebar:
         # LVMH Logo/Branding
-        st.markdown("""
-        <div class="logo-container">
-            <div class="logo-text">LVMH</div>
-            <div class="logo-subtitle">Green in Tech</div>
-        </div>
-        """, unsafe_allow_html=True)
+        logo_path = Path(__file__).parent / "assets" / "lvmh_logo.png"
+        if logo_path.exists():
+            st.image(str(logo_path), use_container_width=True)
+        else:
+            st.markdown("""
+            <div class="logo-container">
+                <div class="logo-text">LVMH</div>
+                <div class="logo-subtitle">Green in Tech</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<p style='text-align: center; color: #C4A35A; font-size: 0.9rem; margin-top: -10px;'>Green in Tech</p>", unsafe_allow_html=True)
         
         st.markdown("---")
         
@@ -678,6 +684,38 @@ def render_scenario_builder():
             scenario.name = f"Moderate {len(st.session_state.scenarios) + 1}"
             st.session_state.scenarios.append(scenario)
             st.success(f"Added: {scenario.name}")
+        
+        with st.expander("> View Moderate Assumptions"):
+            st.markdown("""
+            <div style="font-size: 0.85rem; line-height: 1.6;">
+            <table style="width:100%; border-collapse: collapse;">
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Screen Reduction</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">15%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Landline Removal</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">50%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Laptop Lifespan</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">+10%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Refurbished Share</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">30%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Cloud FinOps</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">10%</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #888;">On-Prem Reduction</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">5%</td>
+                </tr>
+            </table>
+            </div>
+            """, unsafe_allow_html=True)
     
     with col2:
         if st.button("Add Aggressive Scenario", use_container_width=True):
@@ -685,6 +723,42 @@ def render_scenario_builder():
             scenario.name = f"Aggressive {len(st.session_state.scenarios) + 1}"
             st.session_state.scenarios.append(scenario)
             st.success(f"Added: {scenario.name}")
+        
+        with st.expander("> View Aggressive Assumptions"):
+            st.markdown("""
+            <div style="font-size: 0.85rem; line-height: 1.6;">
+            <table style="width:100%; border-collapse: collapse;">
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Screen Reduction</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">30%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Landline Removal</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">100%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Tablet Reduction</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">20%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Laptop Lifespan</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">+20%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Refurbished Share</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">40%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
+                    <td style="padding: 6px 0; color: #888;">Cloud FinOps</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">20%</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #888;">On-Prem Reduction</td>
+                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">15%</td>
+                </tr>
+            </table>
+            </div>
+            """, unsafe_allow_html=True)
     
     with col3:
         if st.button("Clear All Scenarios", use_container_width=True):
@@ -1016,20 +1090,32 @@ def render_business_cases():
             st.markdown(f"**Category:** {case.category.value}")
             st.markdown(f"**Scope:** {case.scope_summary}")
             
-            # Key Metrics
+            # Key Metrics with formula tooltips
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.metric("Investment", f"€{case.total_investment:,.0f}")
+                st.metric(
+                    "Investment", 
+                    f"€{case.total_investment:,.0f}",
+                    help=case.investment_formula if case.investment_formula else None
+                )
             with col2:
-                st.metric("Annual Savings", f"€{case.annual_cost_savings:,.0f}")
+                st.metric(
+                    "Net Savings", 
+                    f"€{case.annual_cost_savings:,.0f}",
+                    help=case.savings_formula if case.savings_formula else None
+                )
             with col3:
+                st.metric(
+                    "CO₂ Avoided", 
+                    f"{case.annual_co2_reduction_kg:,.0f} kg",
+                    help=case.co2_formula if case.co2_formula else None
+                )
+            with col4:
                 if case.payback_months < 999:
                     st.metric("Payback", f"{case.payback_months:.1f} months")
                 else:
-                    st.metric("Payback", "N/A")
-            with col4:
-                st.metric("5-Year NPV", f"€{case.five_year_npv:,.0f}")
+                    st.metric("Payback", "N/A", help="Negative savings = no payback")
             
             st.markdown("---")
             
@@ -1215,7 +1301,7 @@ def render_settings():
     st.title("Configuration")
     st.markdown("*Adjust emission factors, pricing, and model parameters*")
     
-    tabs = st.tabs(["Emission Factors", "Dell Contract", "Cloud Providers"])
+    tabs = st.tabs(["Emission Factors", "Dell Contract", "Cloud Providers", "Business Case Assumptions"])
     
     # Tab 1: Emission Factors
     with tabs[0]:
@@ -1305,6 +1391,330 @@ def render_settings():
         st.markdown("**Provider Emission Factors:**")
         for provider, factor in CLOUD_CO2_FACTORS.items():
             st.write(f"- {provider}: {factor} kg CO₂e/€")
+    
+    # Tab 4: Business Case Assumptions
+    with tabs[3]:
+        st.markdown("### Business Case Investment Assumptions")
+        st.info("💡 Configure the cost assumptions used in Business Case calculations. Defaults are industry benchmarks.")
+        
+        params = st.session_state.params
+        
+        # I1: Laptop Lifespan Extension
+        with st.expander("🔧 I1: Laptop Upgrade Program"):
+            st.markdown("*Upgrade components (SSD, RAM, battery) to extend laptop lifespan instead of full replacement*")
+            col1, col2 = st.columns(2)
+            with col1:
+                params.laptop_upgrade_cost_per_unit = st.number_input(
+                    "Upgrade Cost per Device (€)",
+                    value=float(params.laptop_upgrade_cost_per_unit),
+                    min_value=0.0,
+                    step=5.0,
+                    help="Cost of RAM/SSD/battery upgrade per laptop"
+                )
+            with col2:
+                params.laptop_eligible_upgrade_percent = st.slider(
+                    "% of Fleet Eligible for Upgrade",
+                    min_value=0,
+                    max_value=100,
+                    value=int(params.laptop_eligible_upgrade_percent * 100),
+                    help="Percentage of laptops that can be upgraded instead of replaced"
+                ) / 100
+        
+        # I2: Refurbished Sourcing
+        with st.expander("♻️ I2: Refurbished Laptop Sourcing"):
+            st.markdown("*Choose refurbished over new laptops for annual replacements*")
+            col1, col2 = st.columns(2)
+            with col1:
+                params.refurb_share_percent = st.slider(
+                    "% of Replacements from Refurbished",
+                    min_value=0,
+                    max_value=100,
+                    value=int(params.refurb_share_percent * 100),
+                    help="Percentage of annual laptop replacements to source from refurbished"
+                ) / 100
+            with col2:
+                params.refurb_setup_investment = st.number_input(
+                    "Setup Cost (€)",
+                    value=float(params.refurb_setup_investment),
+                    min_value=0.0,
+                    step=500.0,
+                    help="Usually €0 if using same Dell contract (just different SKU)"
+                )
+        
+        # I3: Screen Reduction
+        with st.expander("🖥️ I3: Screen Count Reduction"):
+            col1, col2 = st.columns(2)
+            with col1:
+                params.screen_hot_desking_investment = st.number_input(
+                    "Hot-Desking Furniture/Setup (€)",
+                    value=float(params.screen_hot_desking_investment),
+                    min_value=0.0,
+                    step=1000.0
+                )
+                params.screen_audit_cost = st.number_input(
+                    "Utilization Audit Cost (€)",
+                    value=float(params.screen_audit_cost),
+                    min_value=0.0,
+                    step=1000.0
+                )
+            with col2:
+                params.screen_booking_system_cost = st.number_input(
+                    "Desk Booking System (€)",
+                    value=float(params.screen_booking_system_cost),
+                    min_value=0.0,
+                    step=1000.0
+                )
+                params.screen_communication_cost = st.number_input(
+                    "Change Management/Comms (€)",
+                    value=float(params.screen_communication_cost),
+                    min_value=0.0,
+                    step=500.0
+                )
+        
+        # I4: Landline Removal
+        with st.expander("📞 I4: Landline to Teams Migration"):
+            col1, col2 = st.columns(2)
+            with col1:
+                params.landline_monthly_telecom_cost = st.number_input(
+                    "Monthly Telecom Cost per Line (€)",
+                    value=float(params.landline_monthly_telecom_cost),
+                    min_value=0.0,
+                    step=1.0,
+                    help="Current cost per landline per month (used to calculate savings)"
+                )
+                params.landline_headset_cost_per_unit = st.number_input(
+                    "Headset Cost per User (€)",
+                    value=float(params.landline_headset_cost_per_unit),
+                    min_value=0.0,
+                    step=5.0
+                )
+            with col2:
+                params.landline_teams_license_cost = st.number_input(
+                    "Teams Phone Licensing (€)",
+                    value=float(params.landline_teams_license_cost),
+                    min_value=0.0,
+                    step=500.0,
+                    help="Marginal cost for Teams calling features"
+                )
+                params.landline_training_cost = st.number_input(
+                    "User Training Program (€)",
+                    value=float(params.landline_training_cost),
+                    min_value=0.0,
+                    step=1000.0
+                )
+        
+        # I5: Cloud FinOps
+        with st.expander("☁️ I5: Cloud FinOps Optimization"):
+            st.markdown("**Investment Costs**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                params.cloud_finops_tool_cost = st.number_input(
+                    "FinOps Tooling (€)",
+                    value=float(params.cloud_finops_tool_cost),
+                    min_value=0.0,
+                    step=1000.0,
+                    help="Annual cost for cloud cost visibility tools (e.g., CloudHealth, Spot.io, native Cost Explorer)"
+                )
+            with col2:
+                params.cloud_consultant_cost = st.number_input(
+                    "Consultant (€)",
+                    value=float(params.cloud_consultant_cost),
+                    min_value=0.0,
+                    step=5000.0,
+                    help="One-time cost for external optimization consultant/project"
+                )
+            with col3:
+                params.cloud_training_cost = st.number_input(
+                    "Training (€)",
+                    value=float(params.cloud_training_cost),
+                    min_value=0.0,
+                    step=1000.0,
+                    help="Training cost for team to learn FinOps practices"
+                )
+            
+            st.markdown("---")
+            st.markdown("**Cloud Cost Breakdown** — What portion of your cloud bill goes to each category?")
+            st.caption("These percentages should sum to 100%. Strategies will apply to their relevant portions only.")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                compute_pct = st.slider(
+                    "Compute %",
+                    min_value=0, max_value=100,
+                    value=int(params.cloud_compute_share * 100),
+                    format="%d%%",
+                    help="VMs, containers, serverless compute (Lambda/Functions). Typically 50-70% of cloud bills."
+                )
+                params.cloud_compute_share = compute_pct / 100.0
+            with col2:
+                storage_pct = st.slider(
+                    "Storage %",
+                    min_value=0, max_value=100,
+                    value=int(params.cloud_storage_share * 100),
+                    format="%d%%",
+                    help="Object storage (S3), block storage (EBS), databases (RDS). Typically 15-30%."
+                )
+                params.cloud_storage_share = storage_pct / 100.0
+            with col3:
+                other_pct = st.slider(
+                    "Other %",
+                    min_value=0, max_value=100,
+                    value=int(params.cloud_other_share * 100),
+                    format="%d%%",
+                    help="Networking, data transfer, DNS, CDN, monitoring. Typically 10-20%."
+                )
+                params.cloud_other_share = other_pct / 100.0
+            
+            # Validation warning
+            total_pct = compute_pct + storage_pct + other_pct
+            if total_pct != 100:
+                st.warning(f"⚠️ Percentages sum to {total_pct}%, should be 100%")
+            
+            st.markdown("---")
+            st.markdown("**Strategy 1: Rightsizing** — Resize over-provisioned VMs *(applies to Compute)*")
+            col1, col2 = st.columns(2)
+            with col1:
+                rightsizing_vm_pct = st.slider(
+                    "% of VMs to analyze",
+                    min_value=0, max_value=100,
+                    value=int(params.finops_rightsizing_vm_share * 100),
+                    format="%d%%",
+                    help="What percentage of your compute workloads will you analyze for rightsizing? Typically 20-50%."
+                )
+                params.finops_rightsizing_vm_share = rightsizing_vm_pct / 100.0
+            with col2:
+                rightsizing_savings_pct = st.slider(
+                    "Expected savings per rightsized VM",
+                    min_value=0, max_value=50,
+                    value=int(params.finops_rightsizing_savings * 100),
+                    format="%d%%",
+                    help="How much do you expect to save on each rightsized VM? Industry benchmark: 15-25%."
+                )
+                params.finops_rightsizing_savings = rightsizing_savings_pct / 100.0
+            
+            st.markdown("**Strategy 2: Reserved Instances** — Commit to 1-3 year capacity for discounts *(applies to Compute)*")
+            col1, col2 = st.columns(2)
+            with col1:
+                reserved_share_pct = st.slider(
+                    "% of workloads to commit",
+                    min_value=0, max_value=100,
+                    value=int(params.finops_reserved_workload_share * 100),
+                    format="%d%%",
+                    help="What percentage of stable, predictable workloads can you commit to? Typically 30-60%."
+                )
+                params.finops_reserved_workload_share = reserved_share_pct / 100.0
+            with col2:
+                reserved_discount_pct = st.slider(
+                    "Discount from commitment",
+                    min_value=0, max_value=70,
+                    value=int(params.finops_reserved_discount * 100),
+                    format="%d%%",
+                    help="Discount you receive for Reserved Instances or Savings Plans. 1-year: ~30%, 3-year: ~60%."
+                )
+                params.finops_reserved_discount = reserved_discount_pct / 100.0
+            
+            st.markdown("**Strategy 3: Orphan Cleanup** — Delete unused/abandoned resources *(applies to Total)*")
+            orphan_pct = st.slider(
+                "% of cloud spend that is orphaned/unused",
+                min_value=0, max_value=30,
+                value=int(params.finops_orphan_waste_percent * 100),
+                format="%d%%",
+                help="Estimate: what percentage of your cloud bill pays for resources no one uses? (stopped VMs, old snapshots, detached storage). Industry: 5-15%."
+            )
+            params.finops_orphan_waste_percent = orphan_pct / 100.0
+            
+            st.markdown("**Strategy 4: Scheduling** — Turn off dev/test outside business hours *(applies to Compute)*")
+            col1, col2 = st.columns(2)
+            with col1:
+                dev_test_pct = st.slider(
+                    "% of cloud spend on dev/test",
+                    min_value=0, max_value=50,
+                    value=int(params.finops_dev_test_share * 100),
+                    format="%d%%",
+                    help="What percentage of your cloud spend is on non-production environments (dev, test, staging)?"
+                )
+                params.finops_dev_test_share = dev_test_pct / 100.0
+            with col2:
+                scheduling_pct = st.slider(
+                    "% time these can be off",
+                    min_value=0, max_value=80,
+                    value=int(params.finops_scheduling_savings * 100),
+                    format="%d%%",
+                    help="How much time can dev/test be turned off? (nights + weekends = ~65%)"
+                )
+                params.finops_scheduling_savings = scheduling_pct / 100.0
+            
+            st.markdown("**Strategy 5: Storage Tiering** — Archive cold data to cheaper tiers *(applies to Storage)*")
+            col1, col2 = st.columns(2)
+            with col1:
+                archivable_pct = st.slider(
+                    "% of storage that can be archived",
+                    min_value=0, max_value=80,
+                    value=int(params.finops_archivable_data * 100),
+                    format="%d%%",
+                    help="What percentage of your storage is cold/rarely accessed and could be moved to archive tier?"
+                )
+                params.finops_archivable_data = archivable_pct / 100.0
+            with col2:
+                archive_discount_pct = st.slider(
+                    "Savings from archiving",
+                    min_value=0, max_value=90,
+                    value=int(params.finops_archive_discount * 100),
+                    format="%d%%",
+                    help="How much cheaper is archive storage? (e.g., S3 Glacier is ~70% cheaper than S3 Standard)"
+                )
+                params.finops_archive_discount = archive_discount_pct / 100.0
+        
+        # I6: On-Prem Consolidation
+        with st.expander("🏢 I6: On-Premises Consolidation"):
+            st.markdown("**Infrastructure Baseline**")
+            col1, col2 = st.columns(2)
+            with col1:
+                params.onprem_annual_infra_cost = st.number_input(
+                    "Annual On-Prem Infra Cost (€)",
+                    value=float(params.onprem_annual_infra_cost),
+                    min_value=0.0,
+                    step=10000.0,
+                    help="Estimated annual cost of on-premises infrastructure (hosting, power, cooling, maintenance, staff). This is your baseline for calculating savings."
+                )
+            with col2:
+                reduction_pct = st.slider(
+                    "Reduction Target (%)",
+                    min_value=0, max_value=50,
+                    value=int(params.onprem_reduction_target * 100),
+                    format="%d%%",
+                    help="What percentage of on-prem footprint can you consolidate or migrate? Typical range: 10-25%."
+                )
+                params.onprem_reduction_target = reduction_pct / 100.0
+            
+            st.markdown("---")
+            st.markdown("**Investment Costs**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                params.onprem_audit_cost = st.number_input(
+                    "Data Center Audit (€)",
+                    value=float(params.onprem_audit_cost),
+                    min_value=0.0,
+                    step=5000.0,
+                    help="Cost to audit current infrastructure and identify consolidation opportunities."
+                )
+            with col2:
+                params.onprem_migration_cost = st.number_input(
+                    "Migration Cost (€)",
+                    value=float(params.onprem_migration_cost),
+                    min_value=0.0,
+                    step=5000.0,
+                    help="Cost to migrate workloads to cloud or consolidate to fewer on-prem servers."
+                )
+            with col3:
+                params.onprem_decom_cost = st.number_input(
+                    "Decommissioning Cost (€)",
+                    value=float(params.onprem_decom_cost),
+                    min_value=0.0,
+                    step=1000.0,
+                    help="Cost to decommission and dispose of retired hardware."
+                )
+        
+        st.success("✅ Changes apply automatically to Business Case calculations.")
 
 # =============================================================================
 # Main Application

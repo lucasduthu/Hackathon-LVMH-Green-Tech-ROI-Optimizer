@@ -449,6 +449,36 @@ hr {
     border-color: var(--lvmh-green);
 }
 
+/* File uploader text fix - ensure dark text */
+[data-testid="stFileUploader"] section,
+[data-testid="stFileUploader"] section button,
+[data-testid="stFileUploader"] label,
+[data-testid="stFileUploader"] span,
+[data-testid="stFileUploader"] small,
+[data-testid="stFileUploader"] p {
+    color: var(--lvmh-charcoal) !important;
+}
+
+[data-testid="stFileUploader"] button {
+    color: var(--lvmh-black) !important;
+    border-color: var(--lvmh-charcoal) !important;
+}
+
+/* Number input step buttons fix */
+.stNumberInput button,
+[data-testid="stNumberInput"] button,
+[data-testid="stNumberInputStepUp"],
+[data-testid="stNumberInputStepDown"] {
+    color: var(--lvmh-black) !important;
+    background: var(--lvmh-sand) !important;
+    border: 1px solid var(--lvmh-charcoal) !important;
+}
+
+.stNumberInput input,
+[data-testid="stNumberInput"] input {
+    color: var(--lvmh-black) !important;
+}
+
 /* Custom card class */
 .metric-card {
     background: var(--glass-bg);

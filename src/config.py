@@ -151,6 +151,67 @@ class GlobalParameters:
     # Emission factors (can be overridden)
     co2_per_kwh: float = ELECTRICITY_CO2_PER_KWH
     cloud_provider: str = "Azure"
+    
+    # =========================================================================
+    # BUSINESS CASE ASSUMPTIONS (Industry benchmarks as defaults)
+    # =========================================================================
+    
+    # Laptop Lifespan Extension (I1)
+    laptop_upgrade_cost_per_unit: float = 75.0  # € per device (RAM/SSD upgrade)
+    laptop_eligible_upgrade_percent: float = 0.40  # 40% of fleet eligible
+    
+    # Refurbished Sourcing (I2)
+    refurb_share_percent: float = 0.40  # 40% of replacements from refurbished
+    refurb_setup_investment: float = 0.0  # € - minimal/zero if using same Dell contract
+    
+    # Screen Reduction (I3)
+    screen_hot_desking_investment: float = 25_000.0  # € furniture/booking system
+    screen_communication_cost: float = 5_000.0  # € change management
+    screen_audit_cost: float = 8_000.0  # € utilization audit
+    screen_booking_system_cost: float = 10_000.0  # € desk booking system
+    
+    # Landline Removal (I4)
+    landline_monthly_telecom_cost: float = 15.0  # € per line per month
+    landline_teams_license_cost: float = 5_000.0  # € marginal Teams licensing
+    landline_headset_cost_per_unit: float = 30.0  # € per headset
+    landline_training_cost: float = 8_000.0  # € training program
+    
+    # Cloud FinOps (I5) - Granular Strategy Inputs
+    # Investment costs
+    cloud_finops_tool_cost: float = 15_000.0  # € annual tooling (e.g., CloudHealth, Spot.io)
+    cloud_consultant_cost: float = 20_000.0  # € optimization project / consultant
+    cloud_training_cost: float = 5_000.0     # € team training on FinOps practices
+    
+    # Cloud Cost Breakdown (must sum to 100%)
+    cloud_compute_share: float = 0.60        # % of cloud bill that is compute (VMs, containers)
+    cloud_storage_share: float = 0.25        # % of cloud bill that is storage (S3, disks, DBs)
+    cloud_other_share: float = 0.15          # % of cloud bill that is other (network, transfer)
+    
+    # Strategy 1: Rightsizing — applies to COMPUTE portion only
+    finops_rightsizing_vm_share: float = 0.30    # % of compute to analyze for rightsizing
+    finops_rightsizing_savings: float = 0.20     # % savings on resized VMs (industry: 15-25%)
+    
+    # Strategy 2: Reserved Instances — applies to COMPUTE portion only
+    finops_reserved_workload_share: float = 0.40 # % of compute suitable for commitment
+    finops_reserved_discount: float = 0.35       # % discount for Reserved/Savings Plans (30-60%)
+    
+    # Strategy 3: Orphan Cleanup — applies to TOTAL spend
+    finops_orphan_waste_percent: float = 0.08    # % of total spend that is orphaned (5-15%)
+    
+    # Strategy 4: Scheduling — applies to COMPUTE portion only
+    finops_dev_test_share: float = 0.25          # % of compute that is dev/test environments
+    finops_scheduling_savings: float = 0.50      # % of time dev/test can be off (nights/weekends)
+    
+    # Strategy 5: Storage Tiering — applies to STORAGE portion only
+    finops_archivable_data: float = 0.40         # % of storage that can be archived
+    finops_archive_discount: float = 0.70        # % savings from archiving (S3 Glacier vs Standard)
+    
+    # On-Prem Consolidation (I6)
+    onprem_annual_infra_cost: float = 100_000.0  # € estimated annual on-prem infrastructure cost
+    onprem_reduction_target: float = 0.15        # % reduction target (10-25% typical)
+    onprem_audit_cost: float = 20_000.0  # € data center audit
+    onprem_migration_cost: float = 40_000.0  # € cloud migration
+    onprem_decom_cost: float = 10_000.0  # € decommissioning
 
 # =============================================================================
 # PERSONA DEFINITIONS
