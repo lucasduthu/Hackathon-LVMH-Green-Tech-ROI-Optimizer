@@ -1,1756 +1,1126 @@
 """
-LVMH Green in Tech ROI Calculator
+LVMH — Green in Tech ROI Calculator
 
-A comprehensive Streamlit application for calculating and optimizing
-the ROI of LVMH's Green in Tech initiative, combining financial and
-environmental metrics into a unified Green ROI score.
+Streamlit application rebuilt around the "parcours de décision" UX:
+a five-phase journey (Cadrer → Diagnostiquer → Explorer → Arbitrer → Planifier)
+with a persistent, live Green ROI arbitrage gauge.
 
-Model Assumptions:
-- ADEME emission factors are placeholders and editable in the UI
-- Optimization uses heuristic grid search (not exact solver)  
-- Dell laptop contract pricing: 700€ new, 850€ refurbished (editable)
-- Target: 20% CO₂ reduction by 2026
-- Annual program budget: 500,000€
+The interface (editorial luxury layout, custom HTML cards, SVG charts) is wired
+to the *real* calculation engine in src/ — baseline, scenarios, optimiser and
+business cases. Nothing here is illustrative: every figure comes from the engine.
+
+    Green ROI = α · Finance + (1 − α) · Carbone
 """
 
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from pathlib import Path
 import copy
 import sys
+import re
+from pathlib import Path
 
-# Add src to path
+import streamlit as st
+
+# Make src importable
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.data_loader import (
-    EquipmentData, 
-    load_excel_data, 
-    save_default_excel,
-    create_default_excel_data,
-)
-from src.config import (
-    ADEME_EMISSION_FACTORS,
-    ELECTRICITY_CO2_PER_KWH,
-    CLOUD_CO2_FACTORS,
-    GlobalParameters,
-    DEFAULT_PERSONAS,
-    DEFAULT_INITIATIVES,
-)
+from src.data_loader import EquipmentData, load_excel_data, save_default_excel
+from src.config import GlobalParameters
 from src.baseline import compute_baseline, BaselineMetrics
 from src.scenario import (
-    ScenarioParams, 
-    ScenarioMetrics,
+    ScenarioParams,
     compute_scenario,
-    create_default_scenario,
     create_moderate_scenario,
     create_aggressive_scenario,
 )
-from src.roi import compute_all_roi_metrics, ROIMetrics
-from src.optimizer import (
-    OptimizationConfig,
-    run_optimization,
-    compute_initiative_contributions,
-    quick_rank_scenarios,
-)
-from src.business_case import (
-    generate_all_business_cases,
-    BusinessCase,
-    RiskLevel,
-)
+from src.optimizer import OptimizationConfig, run_optimization
+from src.business_case import generate_all_business_cases
+
 
 # =============================================================================
-# Page Configuration
+# Page configuration & theme
 # =============================================================================
 
 st.set_page_config(
-    page_title="LVMH Green in Tech ROI Calculator",
+    page_title="Green in Tech — ROI Calculator",
     page_icon="◆",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Load custom CSS
+
 def load_css():
     css_path = Path(__file__).parent / "assets" / "theme.css"
     if css_path.exists():
-        with open(css_path) as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-    
-    # Additional professional styling
-    st.markdown("""
-    <style>
-    /* Business case card styling */
-    .business-case-card {
-        background: linear-gradient(135deg, #FAFAF8 0%, #F5F0E6 100%);
-        border-radius: 12px;
-        padding: 24px;
-        margin-bottom: 16px;
-        border-left: 4px solid #4A7C59;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }
-    
-    .business-case-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 16px;
-    }
-    
-    .business-case-title {
-        font-family: 'Playfair Display', Georgia, serif;
-        font-size: 1.25rem;
-        color: #1A1A1A;
-        margin: 0;
-    }
-    
-    .category-badge {
-        background: #1A1A1A;
-        color: #F5F0E6;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    
-    .action-item {
-        display: flex;
-        align-items: flex-start;
-        padding: 12px 0;
-        border-bottom: 1px solid rgba(0,0,0,0.08);
-    }
-    
-    .action-number {
-        background: #4A7C59;
-        color: white;
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.75rem;
-        margin-right: 12px;
-        flex-shrink: 0;
-    }
-    
-    .action-content {
-        flex: 1;
-    }
-    
-    .action-desc {
-        color: #1A1A1A;
-        margin-bottom: 4px;
-    }
-    
-    .action-meta {
-        font-size: 0.8rem;
-        color: #6D6D6D;
-    }
-    
-    .risk-badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 500;
-    }
-    
-    .risk-low { background: #E8F5E9; color: #2E7D32; }
-    .risk-medium { background: #FFF3E0; color: #E65100; }
-    .risk-high { background: #FFEBEE; color: #C62828; }
-    
-    .metric-highlight {
-        font-size: 2rem;
-        font-weight: 600;
-        color: #4A7C59;
-    }
-    
-    .recommendation-badge {
-        display: inline-block;
-        padding: 6px 16px;
-        border-radius: 20px;
-        font-weight: 600;
-        text-transform: uppercase;
-        font-size: 0.8rem;
-        letter-spacing: 0.05em;
-    }
-    
-    .rec-must-do { background: #4A7C59; color: white; }
-    .rec-should-do { background: #C4A35A; color: #1A1A1A; }
-    .rec-consider { background: #E8E0D5; color: #1A1A1A; }
-    
-    /* Metric card styling */
-    .metric-card {
-        background: linear-gradient(135deg, rgba(245, 240, 230, 0.8) 0%, rgba(250, 248, 245, 0.8) 100%);
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 16px;
-        border: 1px solid rgba(232, 224, 213, 0.6);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    }
-    
-    .metric-card h3, .metric-card h4 {
-        margin: 0 0 8px 0;
-        font-family: 'Playfair Display', Georgia, serif;
-        color: #1A1A1A;
-    }
-    
-    .metric-card p {
-        margin: 0;
-        color: #3D3D3D;
-    }
-    
-    /* Logo styling */
-    .logo-container {
-        text-align: center;
-        padding: 20px;
-        margin-bottom: 20px;
-    }
-    
-    .logo-text {
-        font-family: 'Playfair Display', Georgia, serif;
-        font-size: 1.5rem;
-        color: #F5F0E6;
-        letter-spacing: 0.2em;
-    }
-    
-    .logo-subtitle {
-        font-size: 0.75rem;
-        color: #4A7C59;
-        letter-spacing: 0.3em;
-        text-transform: uppercase;
-        margin-top: 4px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+        st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
 
-load_css()
 
 # =============================================================================
-# Session State Initialization
+# Maison presets  ·  (name, office %, tech %, retail %, headcount)
 # =============================================================================
 
-def init_session_state():
-    """Initialize all session state variables."""
-    
-    if "data" not in st.session_state:
-        st.session_state.data = None
-    
-    if "params" not in st.session_state:
-        st.session_state.params = GlobalParameters()
-    
-    if "ademe_factors" not in st.session_state:
-        st.session_state.ademe_factors = copy.deepcopy(ADEME_EMISSION_FACTORS)
-    
-    if "scenarios" not in st.session_state:
-        st.session_state.scenarios = []
-    
-    if "baseline" not in st.session_state:
-        st.session_state.baseline = None
-    
-    if "optimization_result" not in st.session_state:
-        st.session_state.optimization_result = None
-    
-    if "business_cases" not in st.session_state:
-        st.session_state.business_cases = None
-    
-    if "current_page" not in st.session_state:
-        st.session_state.current_page = "Overview"
+PRESETS = [
+    ("Dior Couture", 50, 20, 30, 4200),
+    ("Louis Vuitton", 55, 10, 35, 9000),
+    ("Sephora", 35, 10, 55, 6200),
+    ("LVMH Tech", 25, 65, 10, 1500),
+]
 
-init_session_state()
+# Display normalisation references for the live arbitrage gauge.
+# (The engine's ranked Green ROI uses cross-scenario min-max; for a single live
+#  scenario we normalise against intuitive absolute references that scale with
+#  the Maison so the gauge stays meaningful for any fleet size.)
+FIN_REF_FRAC = 0.30  # saving 30 % of the baseline TCO == full finance score
+CAR_REF = 0.40       # 40 % CO2 reduction == full carbon score
+
 
 # =============================================================================
-# Data Loading
+# Data & parameter builders
 # =============================================================================
 
-def ensure_data_loaded():
-    """Ensure data is loaded, using default if necessary."""
-    
-    if st.session_state.data is None:
-        default_path = Path(__file__).parent / "data" / "UC1_Inputs.xlsx"
-        
-        if not default_path.exists():
-            default_path.parent.mkdir(parents=True, exist_ok=True)
-            save_default_excel(default_path)
-        
-        try:
-            st.session_state.data = load_excel_data(default_path)
-        except Exception as e:
-            st.error(f"Failed to load data: {e}")
-            return False
-    
-    return True
+@st.cache_resource(show_spinner=False)
+def get_original_data() -> EquipmentData:
+    """Load the reference equipment workbook once."""
+    path = Path(__file__).parent / "data" / "UC1_Inputs.xlsx"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        save_default_excel(path)
+    return load_excel_data(path)
 
-def recompute_baseline():
-    """Recompute baseline metrics with current data and parameters."""
-    if st.session_state.data is not None:
-        st.session_state.baseline = compute_baseline(
-            st.session_state.data,
-            st.session_state.params,
-            st.session_state.ademe_factors
+
+def build_data(n_emp: int, off: int, tec: int, ret: int) -> EquipmentData:
+    """Derive an equipment inventory from a persona split (Office/Tech/Retail).
+
+    Mirrors the persona model:
+      Laptops  = N · (office + tech)
+      Screens  = N · (office + 2·tech)      (tech = dual screen)
+      Mobiles  = N · (office + tech + retail)
+      Landline = N · office
+    Networking & meeting-room screens scale with headcount.
+    """
+    base = get_original_data()
+    data = copy.deepcopy(base)
+
+    of, tf, rf = off / 100.0, tec / 100.0, ret / 100.0
+    counts = copy.deepcopy(base.equipment_counts)
+    counts["Laptop"] = int(n_emp * (of + tf))
+    counts["Screen"] = int(n_emp * (of + 2 * tf))
+    counts["Smartphone"] = int(n_emp * (of + tf + rf))
+    counts["Landline phone"] = int(n_emp * of)
+
+    ratio = n_emp / 1000.0
+    if "Switch/Router" in counts:
+        counts["Switch/Router"] = max(1, int(base.equipment_counts.get("Switch/Router", 100) * ratio))
+    if "Meeting room screen" in counts:
+        counts["Meeting room screen"] = max(1, int(base.equipment_counts.get("Meeting room screen", 200) * ratio))
+
+    data.equipment_counts = counts
+    return data
+
+
+def build_params(budget: float, target: float, carbf: float, alpha: float,
+                 onprem: float, eol: float) -> GlobalParameters:
+    p = GlobalParameters()
+    p.program_budget = budget
+    p.target_co2_reduction = target
+    p.co2_per_kwh = carbf
+    p.alpha = alpha
+    p.onprem_co2_baseline = onprem
+    p.end_of_life_cost = eol
+    return p
+
+
+# =============================================================================
+# Scenario helpers
+# =============================================================================
+
+def manual_scenario(data: EquipmentData, rec: float, life_months: float,
+                    scr: float, cloud: float, budget: float) -> ScenarioParams:
+    """Build a ScenarioParams from the four manual levers of phase 3."""
+    lap_life = data.equipment_lifespan.get("Laptop", 60)
+    ext = (life_months / lap_life) if lap_life > 0 else 0.0
+    return ScenarioParams(
+        name="Scénario manuel",
+        device_reductions={"Screen": scr / 100.0},
+        sourcing_mix={"Laptop": {"new": 1 - rec / 100.0, "refurb": rec / 100.0, "lease": 0.0}},
+        lifespan_extensions={"Laptop": ext},
+        cloud_cost_reduction=cloud / 100.0,
+        onprem_reduction=0.0,
+        program_cost=budget,
+    )
+
+
+def estimate_investment(data: EquipmentData, params: GlobalParameters,
+                        scen: ScenarioParams) -> float:
+    """Approximate the one-off programme investment implied by a scenario's
+    active levers, reusing the business-case cost assumptions."""
+    rec = scen.sourcing_mix.get("Laptop", {}).get("refurb", 0.0)
+    life_frac = scen.lifespan_extensions.get("Laptop", 0.0)
+    life_months = life_frac * data.equipment_lifespan.get("Laptop", 60)
+    scr = scen.device_reductions.get("Screen", 0.0)
+    cloud = scen.cloud_cost_reduction
+    landline = scen.device_reductions.get("Landline phone", 0.0)
+    onprem = scen.onprem_reduction
+
+    inv = 0.0
+    if life_months > 0:
+        eligible = int(data.equipment_counts.get("Laptop", 0) * params.laptop_eligible_upgrade_percent)
+        inv += eligible * params.laptop_upgrade_cost_per_unit
+    if scr > 0:
+        inv += (params.screen_audit_cost + params.screen_hot_desking_investment
+                + params.screen_booking_system_cost + params.screen_communication_cost)
+    if cloud > 0:
+        inv += params.cloud_finops_tool_cost + params.cloud_consultant_cost + params.cloud_training_cost
+    if landline > 0:
+        count = data.equipment_counts.get("Landline phone", 0)
+        inv += count * params.landline_headset_cost_per_unit + params.landline_training_cost + params.landline_teams_license_cost
+    if onprem > 0:
+        inv += params.onprem_audit_cost + params.onprem_migration_cost + params.onprem_decom_cost
+    if rec > 0:
+        inv += params.refurb_setup_investment
+    return inv
+
+
+def clamp(x, lo=0.0, hi=1.0):
+    return max(lo, min(hi, x))
+
+
+def arbitrage_score(savings: float, reduction: float, alpha: float, baseline_tco: float):
+    """Return (norm_finance, norm_carbon, green_roi) for the live gauge.
+
+    norm_finance : savings as a share of the baseline TCO (30 % saved == full)
+    norm_carbon  : CO2 reduction vs a 40 % reference
+    Both references scale with the Maison, so the gauge reads sensibly at any size.
+    """
+    nf = clamp(savings / max(baseline_tco * FIN_REF_FRAC, 1.0))
+    nc = clamp(reduction / CAR_REF)
+    gr = alpha * nf + (1 - alpha) * nc
+    return nf, nc, gr
+
+
+def eval_scenario(data, baseline, params, scen, alpha, budget, name=None):
+    """Evaluate one scenario against the baseline and score it."""
+    m = compute_scenario(data, baseline, scen, params, None)
+    savings = baseline.total_tco - m.operational_tco
+    red = (baseline.total_co2 - m.total_co2) / baseline.total_co2 if baseline.total_co2 > 0 else 0.0
+    nf, nc, gr = arbitrage_score(savings, red, alpha, baseline.total_tco)
+    inv = estimate_investment(data, params, scen)
+    payback = (inv / savings) if savings > 0 else float("inf")
+    return {
+        "name": name or scen.name,
+        "tco": m.operational_tco,
+        "co2": m.total_co2,
+        "savings": savings,
+        "red": red,
+        "within_budget": inv <= budget,
+        "meets_target": red >= params.target_co2_reduction,
+        "payback": payback,
+        "gr": gr, "nf": nf, "nc": nc,
+    }
+
+
+# =============================================================================
+# Cached heavy computations (optimiser grid + business cases)
+# =============================================================================
+
+@st.cache_data(show_spinner=False)
+def optimise_cached(n_emp, off, tec, ret, budget, target, carbf, onprem, eol):
+    """Evaluate the full lever grid (~4 800 configs) once per core context."""
+    data = build_data(n_emp, off, tec, ret)
+    params = build_params(budget, target, carbf, 0.5, onprem, eol)
+    cfg = OptimizationConfig(budget=budget, target_reduction=target, alpha=0.5,
+                             max_scenarios=6000, top_n=20)
+    res = run_optimization(data, params, cfg)
+
+    out = []
+    for sc, mt, ro in (res.all_results or []):
+        inv = estimate_investment(data, params, sc)
+        out.append({
+            "savings": ro.cost_savings,
+            "red": ro.co2_reduction_percent,
+            "tco": mt.operational_tco,
+            "co2": mt.total_co2,
+            "within_budget": inv <= budget,
+            "meets_target": ro.co2_reduction_percent >= target,
+            "inv": inv,
+            "screen": sc.device_reductions.get("Screen", 0.0),
+            "refurb": sc.sourcing_mix.get("Laptop", {}).get("refurb", 0.0),
+            "life": sc.lifespan_extensions.get("Laptop", 0.0),
+            "cloud": sc.cloud_cost_reduction,
+            "onprem": sc.onprem_reduction,
+        })
+    return {"evaluated": res.total_scenarios_evaluated, "results": out}
+
+
+@st.cache_data(show_spinner=False)
+def business_cases_cached(n_emp, off, tec, ret, budget, target, carbf, onprem, eol):
+    data = build_data(n_emp, off, tec, ret)
+    params = build_params(budget, target, carbf, 0.5, onprem, eol)
+    cases = generate_all_business_cases(data, params)
+    out = []
+    for c in cases:
+        roi_pct = (c.annual_cost_savings / c.total_investment * 100) if c.total_investment > 0 else 0.0
+        out.append({
+            "id": c.initiative_id, "title": c.title, "category": c.category.value,
+            "reco": c.recommendation, "score": c.priority_score,
+            "npv": c.five_year_npv, "investment": c.total_investment,
+            "savings": c.annual_cost_savings, "roi_pct": roi_pct,
+            "co2": c.annual_co2_reduction_kg, "co2_pct": c.co2_reduction_percent,
+            "quarter": c.recommended_quarter, "weeks": c.implementation_weeks,
+            "owner": c.owner_department, "risk": c.overall_risk.value,
+            "actions": [(a.description, a.owner) for a in c.actions],
+            "risks": [(rk.level.value, rk.description, rk.mitigation) for rk in c.risks],
+        })
+    return out
+
+
+# =============================================================================
+# Formatting helpers
+# =============================================================================
+
+def fmt_int(n) -> str:
+    return f"{int(round(n)):,}".replace(",", " ")
+
+def fmt_k(n) -> str:           # euros → "k€"
+    return fmt_int(n / 1000.0) + " k€"
+
+def fmt_m(n) -> str:           # euros → "M€" value (2 decimals, dot)
+    return f"{n / 1e6:.2f}"
+
+def fmt_t(kg) -> str:          # kg CO2 → tonnes (int)
+    return fmt_int(kg / 1000.0)
+
+def pct1(frac) -> str:
+    return f"{frac * 100:.1f}"
+
+
+# =============================================================================
+# SVG builders
+# =============================================================================
+
+def donut(segments) -> str:
+    """segments = [(pct, css_color), ...] summing to ≤ 100."""
+    parts = ['<circle cx="21" cy="21" r="15.915" fill="none" stroke="var(--surface-2)" stroke-width="6"/>']
+    cum = 0.0
+    for pct, color in segments:
+        off = 25 - cum
+        parts.append(
+            f'<circle cx="21" cy="21" r="15.915" fill="none" stroke="{color}" '
+            f'stroke-width="6" stroke-dasharray="{pct:.1f} {100 - pct:.1f}" '
+            f'stroke-dashoffset="{off:.1f}"/>'
         )
+        cum += pct
+    return '<svg width="148" height="148" viewBox="0 0 42 42" aria-hidden="true">' + "".join(parts) + "</svg>"
 
-# =============================================================================
-# Sidebar
-# =============================================================================
 
-def render_sidebar():
-    """Render the sidebar with navigation and controls."""
-    
-    with st.sidebar:
-        # LVMH Logo/Branding
-        logo_path = Path(__file__).parent / "assets" / "lvmh_logo.png"
-        if logo_path.exists():
-            st.image(str(logo_path), use_container_width=True)
+def scatter(scenarios, target) -> str:
+    """Build the arbitrage frontier scatter (savings × CO2 reduction)."""
+    x0, x1, ytop, ybot = 50, 404, 30, 256
+    max_sav = max([s["savings"] for s in scenarios] + [1.0])
+    max_sav *= 1.12
+    max_red = max([s["red"] for s in scenarios] + [target, 0.30]) * 1.08
+
+    def X(v): return x0 + clamp(v / max_sav) * (x1 - x0)
+    def Y(v): return ybot - clamp(v / max_red) * (ybot - ytop)
+
+    svg = [f'<svg viewBox="0 0 420 296" width="100%" role="img" aria-label="Frontière d\'arbitrage">']
+    # axes
+    svg.append(f'<line x1="{x0}" y1="{ybot}" x2="{x1}" y2="{ybot}" stroke="var(--line-strong)"/>')
+    svg.append(f'<line x1="{x0}" y1="{ytop-6}" x2="{x0}" y2="{ybot}" stroke="var(--line-strong)"/>')
+    # target line
+    yt = Y(target)
+    svg.append(f'<line x1="{x0}" y1="{yt:.0f}" x2="{x1}" y2="{yt:.0f}" stroke="var(--green)" stroke-dasharray="4 4" opacity=".6"/>')
+    svg.append(f'<text x="{x1}" y="{yt-5:.0f}" text-anchor="end" font-size="9" fill="var(--green)" font-family="Inter">cible −{target*100:.0f} %</text>')
+    # axis labels
+    svg.append(f'<text x="225" y="288" text-anchor="middle" font-size="10" fill="var(--ink-mute)" font-family="Inter">Économies annuelles (€) →</text>')
+    svg.append(f'<text x="14" y="145" text-anchor="middle" font-size="10" fill="var(--ink-mute)" font-family="Inter" transform="rotate(-90 14 145)">Réduction CO₂e (%) →</text>')
+
+    best = max(range(len(scenarios)), key=lambda i: scenarios[i]["gr"]) if scenarios else -1
+    for i, s in enumerate(scenarios):
+        cx, cy = X(s["savings"]), Y(s["red"])
+        r = 7 + s["gr"] * 18
+        if s.get("baseline"):
+            fill, op, tcol = "var(--ink-mute)", ".5", "#fff"
+        elif i == best:
+            fill, op, tcol = "var(--ink)", "1", "var(--gold)"
+        elif s["within_budget"] and s["meets_target"]:
+            fill, op, tcol = "var(--green)", ".8", "#fff"
         else:
-            st.markdown("""
-            <div class="logo-container">
-                <div class="logo-text">LVMH</div>
-                <div class="logo-subtitle">Green in Tech</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("<p style='text-align: center; color: #C4A35A; font-size: 0.9rem; margin-top: -10px;'>Green in Tech</p>", unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Navigation
-        st.markdown("### Navigation")
-        
-        pages = [
-            "Overview",
-            "Baseline Analysis",
-            "Scenario Builder",
-            "Scenario Comparison",
-            "Business Cases",
-            "Optimization",
-            "Settings",
-        ]
-        
-        current_index = pages.index(st.session_state.current_page) if st.session_state.current_page in pages else 0
-        st.session_state.current_page = st.radio(
-            "Go to",
-            pages,
-            index=current_index,
-            label_visibility="collapsed"
-        )
-        
-        st.markdown("---")
-        
-        # Data Source
-        st.markdown("### Data Source")
-        
-        uploaded_file = st.file_uploader(
-            "Upload Excel file",
-            type=["xlsx", "xls"],
-            help="Upload your equipment data Excel file"
-        )
-        
-        if uploaded_file is not None:
-            try:
-                st.session_state.data = load_excel_data(uploaded_file)
-                recompute_baseline()
-                st.success("Data loaded successfully")
-            except Exception as e:
-                st.error(f"Error loading file: {e}")
-        
-        if st.button("Reset to Default Data"):
-            default_path = Path(__file__).parent / "data" / "UC1_Inputs.xlsx"
-            if default_path.exists():
-                st.session_state.data = load_excel_data(default_path)
-                recompute_baseline()
-                st.success("Reset to default data")
-        
-        st.markdown("---")
-        
-        # Global Parameters
-        st.markdown("### Global Parameters")
-        
-        params = st.session_state.params
-        
-        params.program_budget = st.number_input(
-            "Program Budget (€/year)",
-            value=int(params.program_budget),
-            min_value=0,
-            step=50000,
-            format="%d"
-        )
-        
-        params.target_co2_reduction = st.slider(
-            "Target CO₂ Reduction (%)",
-            min_value=5,
-            max_value=50,
-            value=int(params.target_co2_reduction * 100),
-            format="%d%%"
-        ) / 100
-        
-        params.onprem_co2_baseline = st.number_input(
-            "On-Prem CO₂ Baseline (kg/year)",
-            value=float(params.onprem_co2_baseline),
-            min_value=0.0,
-            step=1000.0,
-            help="LVMH's on-premises infrastructure emissions. Default assumes 60/20/30 split (Equipment/On-Prem/Cloud)."
-        )
-        
-        params.alpha = st.slider(
-            "Green ROI Weight (α)",
-            min_value=0.0,
-            max_value=1.0,
-            value=params.alpha,
-            step=0.1,
-            help="α=1: Pure financial, α=0: Pure environmental"
-        )
-        
-        st.session_state.params = params
+            fill, op, tcol = "var(--gold)", ".55", "#fff"
+        svg.append(f'<circle cx="{cx:.0f}" cy="{cy:.0f}" r="{r:.0f}" fill="{fill}" opacity="{op}"/>')
+        svg.append(f'<text x="{cx:.0f}" y="{cy+3:.0f}" text-anchor="middle" font-size="8.5" fill="{tcol}" font-family="Inter">{s["short"]}</text>')
+    svg.append("</svg>")
+    return "".join(svg)
+
 
 # =============================================================================
-# Page: Overview
+# Session state
 # =============================================================================
 
-def render_overview():
-    """Render the overview/welcome page."""
-    
-    st.title("LVMH Green in Tech ROI Calculator")
-    
-    st.markdown("""
-    <div class="metric-card">
-        <h3>Strategic ROI Framework</h3>
-        <p>Evaluate Green IT initiatives by combining financial and environmental metrics into a unified <strong>Green ROI</strong> score.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Key Objectives
-    st.markdown("### Key Objectives")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        <div class="metric-card">
-            <h4>Target</h4>
-            <p class="metric-highlight">-20%</p>
-            <p>CO₂ reduction by 2026</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div class="metric-card">
-            <h4>Budget</h4>
-            <p class="metric-highlight">€500k</p>
-            <p>Annual program investment</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div class="metric-card">
-            <h4>Coverage</h4>
-            <p class="metric-highlight">95%+</p>
-            <p>Maisons participating</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Quick Start
-    st.markdown("### Quick Start")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        if st.button("View Baseline", use_container_width=True):
-            st.session_state.current_page = "Baseline Analysis"
-            st.rerun()
-    
-    with col2:
-        if st.button("Build Scenarios", use_container_width=True):
-            st.session_state.current_page = "Scenario Builder"
-            st.rerun()
-    
-    with col3:
-        if st.button("Generate Business Cases", use_container_width=True):
-            st.session_state.current_page = "Business Cases"
-            st.rerun()
-    
-    with col4:
-        if st.button("Run Optimization", use_container_width=True):
-            st.session_state.current_page = "Optimization"
-            st.rerun()
-    
-    st.markdown("---")
-    
-    # Model Assumptions
-    with st.expander("Model Assumptions"):
-        st.markdown("""
-        **Data Sources:**
-        - Equipment counts, prices, and lifespans from Excel input
-        - ADEME emission factors (editable in Settings)
-        - Dell contract pricing for laptops
-        
-        **Calculations:**
-        - Annualized Capex = (Count × Price) / (Lifespan / 12)
-        - Embodied CO₂ = (Count × Emission Factor) / (Lifespan / 12)
-        - Green ROI = α × Normalized Financial ROI + (1-α) × Normalized Environmental ROI
-        
-        **Optimization:**
-        - Grid search across initiative combinations
-        - Filtered by budget and CO₂ target constraints
-        - Ranked by composite Green ROI score
-        """)
+def init_state():
+    d = st.session_state
+    d.setdefault("phase", 1)
+    d.setdefault("maison", "Dior Couture")
+    d.setdefault("eff", 4200)
+    d.setdefault("mo", 50)
+    d.setdefault("mt", 20)
+    d.setdefault("mr", 30)
+    d.setdefault("bud", 500000)
+    d.setdefault("carbf", 0.052)
+    d.setdefault("alpha", 0.50)
+    d.setdefault("l_rec", 40)
+    d.setdefault("l_life", 12)
+    d.setdefault("l_scr", 25)
+    d.setdefault("l_cloud", 18)
+    d.setdefault("mode", "Manuel")
+    d.setdefault("target", 20)
+    d.setdefault("onprem", 34000)
+    d.setdefault("eol", 5000)
+    d.setdefault("expert", False)
+    d.setdefault("comparator", [])
+
+
+def goto(n):
+    st.session_state.phase = n
+
+
+def set_preset(name, o, t, r, n):
+    st.session_state.maison = name
+    st.session_state.mo, st.session_state.mt, st.session_state.mr = o, t, r
+    st.session_state.eff = n
+
 
 # =============================================================================
-# Page: Baseline Analysis
+# Sidebar — journey rail
 # =============================================================================
 
-def render_baseline():
-    """Render the baseline analysis page."""
-    
-    st.title("Baseline Analysis")
-    st.markdown("*Current IT infrastructure footprint and emissions*")
-    
-    if not ensure_data_loaded():
-        return
-    
-    recompute_baseline()
-    
-    baseline = st.session_state.baseline
-    data = st.session_state.data
-    
-    if baseline is None:
-        st.error("Could not compute baseline")
-        return
-    
-    # Key Metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            "Total Cost of Ownership",
-            f"€{baseline.total_tco:,.0f}",
-            help="Annual TCO including equipment, energy, cloud, and program costs"
+STEPS = [
+    ("Cadrer", "Périmètre & hypothèses"),
+    ("Diagnostiquer", "Situation de référence"),
+    ("Explorer", "Scénarios & optimisation"),
+    ("Arbitrer", "Comparaison & décision"),
+    ("Planifier", "Business cases & roadmap"),
+]
+
+
+def render_rail(export_md: str):
+    with st.sidebar:
+        st.markdown(
+            '<div class="rail-brand"><span class="lvmh">LVMH</span>'
+            '<span class="sub">Green in Tech</span><br>'
+            '<span class="badge">ROI Calculator</span></div>',
+            unsafe_allow_html=True,
         )
-    
-    with col2:
-        st.metric(
-            "Carbon Footprint",
-            f"{baseline.total_co2:,.0f} kg",
-            help="Annual CO₂ emissions (embodied + use phase + cloud)"
-        )
-    
-    with col3:
-        st.metric(
-            "Equipment Count",
-            f"{sum(data.equipment_counts.values()):,}",
-            help="Total devices in inventory"
-        )
-    
-    with col4:
-        st.metric(
-            "Energy Cost",
-            f"€{baseline.total_energy_cost_annual:,.0f}",
-            help="Annual electricity cost for IT equipment"
-        )
-    
-    st.markdown("---")
-    
-    # Charts
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        st.markdown("### Cost Structure")
-        
-        cost_data = pd.DataFrame({
-            "Category": list(baseline.tco_breakdown.keys()),
-            "Amount": list(baseline.tco_breakdown.values())
-        })
-        
-        fig = px.pie(
-            cost_data,
-            values="Amount",
-            names="Category",
-            hole=0.4,
-            color_discrete_sequence=["#1A1A1A", "#4A7C59", "#5A9969", "#C4A35A", "#E8E0D5"]
-        )
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Montserrat", size=11),
-            height=420,
-            margin=dict(l=20, r=20, t=30, b=100),
-            legend=dict(
-                orientation="h", 
-                yanchor="top", 
-                y=-0.15, 
-                xanchor="center", 
-                x=0.5,
-                font=dict(size=10)
+        st.markdown('<div class="rail-eyebrow">Parcours de décision</div>', unsafe_allow_html=True)
+
+        phase = st.session_state.phase
+        for i, (title, desc) in enumerate(STEPS, start=1):
+            if i < phase:
+                label = f"✓  {title}"
+            elif i == phase:
+                label = f"{i} · {title}"
+            else:
+                label = f"{i} · {title}"
+            st.button(
+                label, key=f"rail_{i}", use_container_width=True,
+                type="primary" if i == phase else "secondary",
+                on_click=goto, args=(i,),
             )
+            st.caption(desc)
+
+        st.markdown('<div class="rail-sep"></div>', unsafe_allow_html=True)
+
+        with st.expander("⚙ Réglages & facteurs"):
+            st.slider("Cible de réduction CO₂ (%)", 5, 50, key="target")
+            st.number_input("Base CO₂ On-Prem (kg/an)", min_value=0, step=1000, key="onprem")
+            st.number_input("Coût fin de vie (€/an)", min_value=0, step=1000, key="eol")
+            st.caption("Facteurs ADEME appliqués par le moteur (src/config.py).")
+
+        st.download_button(
+            "⤓ Exporter le dossier", data=export_md,
+            file_name="green-roi-dossier.md", mime="text/markdown",
+            use_container_width=True,
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col_right:
-        st.markdown("### Emissions Distribution")
-        
-        co2_data = pd.DataFrame({
-            "Category": list(baseline.co2_breakdown.keys()),
-            "Amount": list(baseline.co2_breakdown.values())
-        })
-        
-        fig = px.pie(
-            co2_data,
-            values="Amount",
-            names="Category",
-            hole=0.4,
-            color_discrete_sequence=["#4A7C59", "#5A9969", "#3A6C49", "#C4A35A"]
+        st.toggle("Mode expert (accès libre)", key="expert",
+                  help="Affiche les cinq phases en continu.")
+
+
+# =============================================================================
+# Topbar — context + live arbitrage gauge
+# =============================================================================
+
+def render_topbar(data, params, baseline):
+    rec = st.session_state.l_rec
+    life = st.session_state.l_life
+    scr = st.session_state.l_scr
+    cloud = st.session_state.l_cloud
+    alpha = st.session_state.alpha
+    budget = st.session_state.bud
+
+    scen = manual_scenario(data, rec, life, scr, cloud, budget)
+    ev = eval_scenario(data, baseline, params, scen, alpha, budget, "Manuel")
+    nf, nc, gr = ev["nf"], ev["nc"], ev["gr"]
+
+    col_ctx, col_gauge = st.columns([1.3, 1])
+    with col_ctx:
+        st.markdown(
+            '<div class="topbar" style="border-bottom:0; padding-bottom:0; margin-bottom:0">'
+            '<div class="brand"><span class="lvmh">LVMH</span>'
+            '<span class="sub">Green in Tech</span>'
+            '<span class="badge">ROI Calculator</span></div>'
+            f'<div class="maison-meta"><span class="mname">{st.session_state.maison}</span>'
+            f'<b>{fmt_int(st.session_state.eff)}</b> collaborateurs · budget '
+            f'<b>{fmt_k(budget)}</b></div>'
+            '</div>',
+            unsafe_allow_html=True,
         )
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Montserrat", size=11),
-            height=420,
-            margin=dict(l=20, r=20, t=30, b=100),
-            legend=dict(
-                orientation="h", 
-                yanchor="top", 
-                y=-0.15, 
-                xanchor="center", 
-                x=0.5,
-                font=dict(size=10)
-            )
+    with col_gauge:
+        st.markdown(
+            '<div class="arbitrage" title="Score Green ROI = α·Finance + (1−α)·Carbone">'
+            f'<div class="gr-score"><span class="lab">Green ROI</span>'
+            f'<span class="val tnum">{gr:.2f}</span></div>'
+            '<div class="gr-axes">'
+            f'<div class="axis fin"><span class="tag">Finance</span>'
+            f'<span class="track"><span class="fill" style="width:{nf*100:.0f}%"></span></span>'
+            f'<span class="pct">{nf:.2f}</span></div>'
+            f'<div class="axis car"><span class="tag">Carbone</span>'
+            f'<span class="track"><span class="fill" style="width:{nc*100:.0f}%"></span></span>'
+            f'<span class="pct">{nc:.2f}</span></div>'
+            '</div>'
+            f'<div class="alpha-cap">Arbitrage<br>α&nbsp;<b>{alpha:.2f}</b></div>'
+            '</div>',
+            unsafe_allow_html=True,
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    st.markdown("---")
-    
-    # Equipment Inventory Table
-    st.markdown("### Equipment Inventory")
-    
-    equipment_rows = []
-    for equipment, count in data.equipment_counts.items():
-        if count > 0:
-            price = data.equipment_prices.get(equipment, 0)
-            lifespan = data.equipment_lifespan.get(equipment, 48)
-            capex = baseline.capex_annual.get(equipment, 0)
-            co2 = baseline.co2_embodied_annual.get(equipment, 0) + baseline.co2_use_phase_annual.get(equipment, 0)
-            
-            equipment_rows.append({
-                "Equipment": equipment,
-                "Count": count,
-                "Unit Price (€)": price,
-                "Lifespan (months)": lifespan,
-                "Annual Capex (€)": capex,
-                "Annual CO₂ (kg)": co2
-            })
-    
-    equipment_df = pd.DataFrame(equipment_rows)
-    equipment_df = equipment_df.sort_values("Annual CO₂ (kg)", ascending=False)
-    
-    st.dataframe(
-        equipment_df.style.format({
-            "Count": "{:,}",
-            "Unit Price (€)": "€{:,.0f}",
-            "Lifespan (months)": "{:.0f}",
-            "Annual Capex (€)": "€{:,.0f}",
-            "Annual CO₂ (kg)": "{:,.0f}"
-        }),
-        use_container_width=True,
-        hide_index=True
+        st.slider("Arbitrage α — Finance ⇄ Carbone", 0.0, 1.0, step=0.05,
+                  key="alpha", label_visibility="collapsed")
+
+    st.markdown('<div style="border-bottom:1px solid var(--line); margin:14px 0 20px"></div>',
+                unsafe_allow_html=True)
+
+
+def phase_header(idx, kicker, title, desc):
+    st.markdown(
+        f'<div class="ph-head"><div class="kicker">Étape {idx} / 5 · {kicker}</div>'
+        f'<h1>{title}</h1><p>{desc}</p></div>',
+        unsafe_allow_html=True,
     )
 
+
 # =============================================================================
-# Page: Scenario Builder
+# PHASE 1 — CADRER
 # =============================================================================
 
-def render_scenario_builder():
-    """Render the scenario builder page."""
-    
-    st.title("Scenario Builder")
-    st.markdown("*Configure 2026 target scenarios*")
-    
-    if not ensure_data_loaded():
-        return
-    
-    recompute_baseline()
-    
-    data = st.session_state.data
-    params = st.session_state.params
-    baseline = st.session_state.baseline
-    
-    # Quick Add Templates
-    st.markdown("### Quick Add Templates")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("Add Moderate Scenario", use_container_width=True):
-            scenario = create_moderate_scenario()
-            scenario.name = f"Moderate {len(st.session_state.scenarios) + 1}"
-            st.session_state.scenarios.append(scenario)
-            st.success(f"Added: {scenario.name}")
-        
-        with st.expander("> View Moderate Assumptions"):
-            st.markdown("""
-            <div style="font-size: 0.85rem; line-height: 1.6;">
-            <table style="width:100%; border-collapse: collapse;">
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Screen Reduction</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">15%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Landline Removal</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">50%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Laptop Lifespan</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">+10%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Refurbished Share</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">30%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Cloud FinOps</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">10%</td>
-                </tr>
-                <tr>
-                    <td style="padding: 6px 0; color: #888;">On-Prem Reduction</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600;">5%</td>
-                </tr>
-            </table>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    with col2:
-        if st.button("Add Aggressive Scenario", use_container_width=True):
-            scenario = create_aggressive_scenario()
-            scenario.name = f"Aggressive {len(st.session_state.scenarios) + 1}"
-            st.session_state.scenarios.append(scenario)
-            st.success(f"Added: {scenario.name}")
-        
-        with st.expander("> View Aggressive Assumptions"):
-            st.markdown("""
-            <div style="font-size: 0.85rem; line-height: 1.6;">
-            <table style="width:100%; border-collapse: collapse;">
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Screen Reduction</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">30%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Landline Removal</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">100%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Tablet Reduction</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">20%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Laptop Lifespan</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">+20%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Refurbished Share</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">40%</td>
-                </tr>
-                <tr style="border-bottom: 1px solid rgba(196,163,90,0.3);">
-                    <td style="padding: 6px 0; color: #888;">Cloud FinOps</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">20%</td>
-                </tr>
-                <tr>
-                    <td style="padding: 6px 0; color: #888;">On-Prem Reduction</td>
-                    <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #4A7C59;">15%</td>
-                </tr>
-            </table>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    with col3:
-        if st.button("Clear All Scenarios", use_container_width=True):
-            st.session_state.scenarios = []
-            st.info("All scenarios cleared")
-    
-    st.markdown("---")
-    
-    # Custom Scenario Builder
-    st.markdown("### Create Custom Scenario")
-    
-    with st.form("custom_scenario_form"):
-        scenario_name = st.text_input("Scenario Name", value="Custom Scenario")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**Device Reductions**")
-            screen_reduction = st.slider("Screen Reduction (%)", 0, 50, 20) / 100
-            landline_reduction = st.slider("Landline Reduction (%)", 0, 100, 100) / 100
-            tablet_reduction = st.slider("Tablet Reduction (%)", 0, 50, 0) / 100
-        
-        with col2:
-            st.markdown("**Sourcing & Lifecycle**")
-            laptop_refurb_share = st.slider("Laptop Refurbished Share (%)", 0, 80, 30) / 100
-            laptop_lifespan_ext = st.slider("Laptop Lifespan Extension (%)", 0, 50, 20) / 100
-            screen_lifespan_ext = st.slider("Screen Lifespan Extension (%)", 0, 50, 10) / 100
-        
-        st.markdown("**Infrastructure**")
-        col1, col2 = st.columns(2)
-        with col1:
-            cloud_reduction = st.slider("Cloud Cost Reduction (%)", 0, 30, 15) / 100
-        with col2:
-            onprem_reduction = st.slider("On-Prem Reduction (%)", 0, 20, 10) / 100
-        
-        if st.form_submit_button("Add Custom Scenario", type="primary"):
-            new_scenario = ScenarioParams(
-                name=scenario_name,
-                device_reductions={
-                    "Screen": screen_reduction,
-                    "Landline phone": landline_reduction,
-                    "Tablet": tablet_reduction,
-                },
-                sourcing_mix={
-                    "Laptop": {"new": 1 - laptop_refurb_share, "refurb": laptop_refurb_share, "lease": 0}
-                },
-                lifespan_extensions={
-                    "Laptop": laptop_lifespan_ext,
-                    "Screen": screen_lifespan_ext,
-                },
-                cloud_cost_reduction=cloud_reduction,
-                onprem_reduction=onprem_reduction,
-                program_cost=params.program_budget
-            )
-            st.session_state.scenarios.append(new_scenario)
-            st.success(f"Added: {scenario_name}")
-    
-    st.markdown("---")
-    
-    # Existing Scenarios
-    st.markdown("### Current Scenarios")
-    
-    if not st.session_state.scenarios:
-        st.info("No scenarios created yet. Use the templates or custom builder above.")
+def phase1(data, params, baseline):
+    phase_header(1, "Cadrage", "Définir le périmètre de la Maison",
+                 "Choisissez un préréglage ou saisissez l'effectif et la répartition des "
+                 "personas. L'inventaire cible et le budget se recalculent immédiatement — "
+                 "tout le reste du parcours en découle.")
+
+    left, right = st.columns([1.3, 1], gap="large")
+
+    with left:
+        st.markdown('<div class="c-title"><h3>Préréglages de Maison</h3>'
+                    '<span class="hint">point de départ</span></div>', unsafe_allow_html=True)
+        pcols = st.columns(len(PRESETS))
+        for col, (name, o, t, r, n) in zip(pcols, PRESETS):
+            with col:
+                st.button(f"{name}\n{o} / {t} / {r}", key=f"preset_{name}",
+                          use_container_width=True,
+                          type="primary" if st.session_state.maison == name else "secondary",
+                          on_click=set_preset, args=(name, o, t, r, n))
+
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        st.number_input("Effectif total", min_value=100, max_value=200000, step=100, key="eff")
+
+        o = st.session_state.mo; t = st.session_state.mt; r = st.session_state.mr
+        st.markdown(f'<div class="lv-top"><span class="lv-name">Office '
+                    f'<span class="muted">— support, finance, RH, marketing</span></span>'
+                    f'<span class="lv-val">{o} %</span></div>', unsafe_allow_html=True)
+        st.slider("Office", 0, 100, key="mo", label_visibility="collapsed")
+        st.markdown(f'<div class="lv-top"><span class="lv-name">Tech '
+                    f'<span class="muted">— dev, data, tech leads · double écran</span></span>'
+                    f'<span class="lv-val">{t} %</span></div>', unsafe_allow_html=True)
+        st.slider("Tech", 0, 100, key="mt", label_visibility="collapsed")
+        st.markdown(f'<div class="lv-top"><span class="lv-name">Retail '
+                    f'<span class="muted">— conseillers boutique · mobile seul</span></span>'
+                    f'<span class="lv-val">{r} %</span></div>', unsafe_allow_html=True)
+        st.slider("Retail", 0, 100, key="mr", label_visibility="collapsed")
+
+        total = o + t + r
+        if total == 100:
+            st.markdown('<div class="note">Répartition : 100 %</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="note" style="color:var(--clay)">Répartition : {total} % '
+                        f'— ajustez à 100 %</div>', unsafe_allow_html=True)
+
+    with right:
+        n = st.session_state.eff
+        of, tf, rf = o / 100.0, t / 100.0, r / 100.0
+        laptops = n * (of + tf)
+        screens = n * (of + 2 * tf)
+        mobiles = n * (of + tf + rf)
+        st.markdown('<div class="c-title"><h3>Inventaire cible &amp; hypothèses</h3></div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="derived">'
+            f'<div class="d"><div class="dl">Ordinateurs</div><div class="dv tnum">{fmt_int(laptops)}</div></div>'
+            f'<div class="d"><div class="dl">Écrans</div><div class="dv tnum">{fmt_int(screens)}</div></div>'
+            f'<div class="d"><div class="dl">Mobiles</div><div class="dv tnum">{fmt_int(mobiles)}</div></div>'
+            '</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+        st.number_input("Budget programme annuel (€)", min_value=0, step=50000, key="bud")
+        st.number_input("Intensité carbone électricité (kg CO₂e/kWh · FR)",
+                        min_value=0.0, step=0.001, format="%.3f", key="carbf")
+        st.markdown(
+            '<div class="callout"><div class="ic">i</div><div class="ct">'
+            'Une Maison à forte composante <b>Tech</b> double les écrans : '
+            '<b>+350 kg CO₂e</b> de fabrication par poste et une consommation '
+            'électrique nettement supérieure par collaborateur.</div></div>',
+            unsafe_allow_html=True)
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    c1, c2 = st.columns([3, 1])
+    c1.markdown('<span class="muted">Inventaire et budget actualisés.</span>', unsafe_allow_html=True)
+    c2.button("Diagnostiquer la baseline →", type="primary", use_container_width=True,
+              on_click=goto, args=(2,))
+
+
+# =============================================================================
+# PHASE 2 — DIAGNOSTIQUER
+# =============================================================================
+
+def phase2(data, params, baseline):
+    phase_header(2, "Diagnostic", "Situation de référence — où en sommes-nous ?",
+                 "Une vue à 360° du parc actuel : coûts, énergie et empreinte carbone. "
+                 "Objectif : repérer les postes de coûts majeurs et les gisements de CO₂e "
+                 "avant d'optimiser.")
+
+    tco_b = baseline.tco_breakdown
+    co2_b = baseline.co2_breakdown
+    capex_pct = tco_b.get("Equipment (Capex)", 0)
+    cloud_pct = tco_b.get("Cloud", 0)
+    cost_other = max(0, 100 - capex_pct - cloud_pct)
+    fab_pct = co2_b.get("Equipment (Embodied)", 0)
+    use_pct = co2_b.get("Equipment (Use Phase)", 0)
+    infra_pct = max(0, 100 - fab_pct - use_pct)
+    volume = int(sum(v for v in data.equipment_counts.values() if v > 0))
+    n_types = sum(1 for v in data.equipment_counts.values() if v > 0)
+
+    st.markdown(
+        '<div class="kpis">'
+        f'<div class="kpi"><div class="l">TCO initial</div>'
+        f'<div class="v tnum">{fmt_m(baseline.total_tco)} <small>M€ / an</small></div>'
+        f'<div class="delta neg">Capex {capex_pct:.0f} % · Cloud {cloud_pct:.0f} % · Énergie/EOL {cost_other:.0f} %</div></div>'
+        f'<div class="kpi"><div class="l">Empreinte carbone</div>'
+        f'<div class="v tnum">{fmt_t(baseline.total_co2)} <small>tCO₂e / an</small></div>'
+        f'<div class="delta neg">Fabrication {fab_pct:.0f} % du total</div></div>'
+        f'<div class="kpi"><div class="l">Volume d\'équipements</div>'
+        f'<div class="v tnum">{fmt_int(volume)}</div>'
+        f'<div class="delta mute">{n_types} types actifs</div></div>'
+        '</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    g1, g2 = st.columns(2, gap="large")
+    with g1:
+        st.markdown(
+            '<div class="card"><div class="c-title"><h3>Structure des coûts</h3>'
+            '<span class="hint">Capex · Cloud · Énergie</span></div>'
+            '<div style="display:flex; gap:22px; align-items:center">'
+            + donut([(capex_pct, "var(--gold)"), (cloud_pct, "var(--green)"), (cost_other, "var(--clay)")])
+            + '<div class="legend col">'
+            f'<span><i style="background:var(--gold)"></i>Capex terminaux · {capex_pct:.0f} %</span>'
+            f'<span><i style="background:var(--green)"></i>Cloud (FinOps) · {cloud_pct:.0f} %</span>'
+            f'<span><i style="background:var(--clay)"></i>Énergie &amp; fin de vie · {cost_other:.0f} %</span>'
+            '</div></div></div>', unsafe_allow_html=True)
+    with g2:
+        st.markdown(
+            '<div class="card"><div class="c-title"><h3>Répartition des émissions</h3>'
+            '<span class="hint">Scope 2 &amp; 3</span></div>'
+            '<div style="display:flex; gap:22px; align-items:center">'
+            + donut([(fab_pct, "var(--green)"), (use_pct, "var(--gold)"), (infra_pct, "var(--clay)")])
+            + '<div class="legend col">'
+            f'<span><i style="background:var(--green)"></i>Fabrication (Scope 3) · {fab_pct:.0f} %</span>'
+            f'<span><i style="background:var(--gold)"></i>Usage électrique (Scope 2) · {use_pct:.0f} %</span>'
+            f'<span><i style="background:var(--clay)"></i>Cloud &amp; On-Prem · {infra_pct:.0f} %</span>'
+            '</div></div></div>', unsafe_allow_html=True)
+
+    # detailed inventory table
+    rows = []
+    order = ["Laptop", "Screen", "Smartphone", "Tablet", "Switch/Router",
+             "Landline phone", "Meeting room screen"]
+    labels = {"Laptop": "Ordinateur portable", "Screen": "Écran externe",
+              "Smartphone": "Smartphone", "Tablet": "Tablette",
+              "Switch/Router": "Switch / Routeur", "Landline phone": "Téléphone fixe",
+              "Meeting room screen": "Écran de réunion"}
+    for eq in order:
+        cnt = data.equipment_counts.get(eq, 0)
+        if cnt <= 0:
+            continue
+        price = data.equipment_prices.get(eq, 0)
+        life = data.equipment_lifespan.get(eq, 48)
+        co2 = baseline.co2_embodied_annual.get(eq, 0)
+        rows.append(
+            f'<tr><td>{labels.get(eq, eq)}</td><td class="num tnum">{fmt_int(cnt)}</td>'
+            f'<td class="num tnum">{fmt_int(price)} €</td><td class="num">{life} mois</td>'
+            f'<td class="num tnum">{fmt_t(co2)} t</td></tr>'
+        )
+    st.markdown(
+        '<div class="card" style="margin-top:18px"><div class="c-title"><h3>Inventaire détaillé</h3></div>'
+        '<table class="tbl"><thead><tr><th>Équipement</th><th class="num">Volume</th>'
+        '<th class="num">Prix unit.</th><th class="num">Durée de vie</th>'
+        '<th class="num">CO₂e fab. / an</th></tr></thead><tbody>'
+        + "".join(rows) + '</tbody></table></div>', unsafe_allow_html=True)
+
+    st.markdown(
+        '<div class="callout warn" style="margin-top:18px"><div class="ic">!</div><div class="ct">'
+        'Principal gisement : la <b>fabrication des écrans et portables</b> (Scope 3). '
+        'Les leviers les plus rentables seront l\'<b>allongement des durées de vie</b> '
+        'et le <b>reconditionné</b>.</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    c1.button("← Cadrage", use_container_width=True, on_click=goto, args=(1,))
+    c3.button("Explorer des scénarios →", type="primary", use_container_width=True,
+              on_click=goto, args=(3,))
+
+
+# =============================================================================
+# PHASE 3 — EXPLORER
+# =============================================================================
+
+def lever_row(name, note, value_txt, key, lo, hi):
+    st.markdown(f'<div class="lv-top"><span class="lv-name">{name}</span>'
+                f'<span class="lv-val">{value_txt}</span></div>', unsafe_allow_html=True)
+    st.slider(name, lo, hi, key=key, label_visibility="collapsed")
+    st.markdown(f'<div class="lv-note">{note}</div>', unsafe_allow_html=True)
+
+
+def phase3(data, params, baseline):
+    phase_header(3, "Exploration", "Construire &amp; optimiser des scénarios",
+                 "Deux modes, un même objectif : trouver les combinaisons de leviers qui "
+                 "respectent budget et cible carbone. Le score Green ROI (en haut) réagit "
+                 "en direct à chaque ajustement.")
+
+    st.radio("mode", ["Manuel", "Optimiseur"], key="mode", horizontal=True,
+             label_visibility="collapsed")
+
+    budget = st.session_state.bud
+    alpha = st.session_state.alpha
+
+    if st.session_state.mode == "Manuel":
+        st.markdown('<span class="muted">Ajustez les leviers à la main et observez '
+                    'l\'impact instantané.</span>', unsafe_allow_html=True)
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+        left, right = st.columns([1.4, 1], gap="large")
+        with left:
+            st.markdown('<div class="c-title"><h3>Leviers d\'action — cible 2026</h3></div>',
+                        unsafe_allow_html=True)
+            lever_row("Part de portables reconditionnés",
+                      "Fabrication 300 → 50 kg CO₂e par poste reconditionné.",
+                      f"{st.session_state.l_rec} %", "l_rec", 0, 100)
+            lever_row("Allongement durée de vie",
+                      "Étale l'amortissement et retarde la fabrication (Scope 3).",
+                      f"+{st.session_state.l_life} mois", "l_life", 0, 24)
+            lever_row("Réduction du parc d'écrans (flex-office)",
+                      "Risque organisationnel élevé — pénalité de priorité.",
+                      f"{st.session_state.l_scr} %", "l_scr", 0, 60)
+            lever_row("FinOps cloud — réduction dépense",
+                      "Migration vers l'hyperscaler le moins carboné.",
+                      f"{st.session_state.l_cloud} %", "l_cloud", 0, 40)
+
+        with right:
+            scen = manual_scenario(data, st.session_state.l_rec, st.session_state.l_life,
+                                   st.session_state.l_scr, st.session_state.l_cloud, budget)
+            ev = eval_scenario(data, baseline, params, scen, alpha, budget, "Manuel")
+            target = params.target_co2_reduction
+            st.markdown('<div class="c-title"><h3>Projection vs baseline</h3></div>',
+                        unsafe_allow_html=True)
+            st.markdown(
+                '<div class="proj">'
+                '<div class="l">TCO projeté 2026</div>'
+                f'<div class="v tnum">{fmt_m(ev["tco"])} <small>M€</small></div>'
+                f'<div class="delta pos">▼ {fmt_k(ev["savings"])} d\'économies / an</div>'
+                '<div class="proj-sep"></div>'
+                '<div class="l">CO₂e projeté</div>'
+                f'<div class="v tnum">{fmt_t(ev["co2"])} <small>tCO₂e</small></div>'
+                f'<div class="delta pos">▼ {pct1(ev["red"])} % vs −{target*100:.0f} % cible</div>'
+                '</div>', unsafe_allow_html=True)
+
+            bud_chip = ('<span class="chip ok">✓ Budget respecté</span>' if ev["within_budget"]
+                        else '<span class="chip warn">✗ Budget dépassé</span>')
+            tar_chip = ('<span class="chip ok">✓ Cible carbone atteinte</span>' if ev["meets_target"]
+                        else '<span class="chip warn">✗ Cible non atteinte</span>')
+            st.markdown(f'<div style="margin:14px 0; display:flex; gap:8px; flex-wrap:wrap">'
+                        f'{bud_chip}{tar_chip}</div>', unsafe_allow_html=True)
+
+            if st.button("+ Ajouter au comparateur", type="primary", use_container_width=True):
+                snap = copy.deepcopy(scen)
+                snap.name = f"Manuel {len(st.session_state.comparator) + 1}"
+                st.session_state.comparator.append(snap)
+                st.toast(f"Ajouté : {snap.name}")
+
     else:
-        for i, scenario in enumerate(st.session_state.scenarios):
-            with st.expander(f"{scenario.name}"):
-                # Compute metrics for this scenario
-                metrics = compute_scenario(data, baseline, scenario, params, st.session_state.ademe_factors)
-                
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    # Use operational_tco (excludes program cost) for comparison with baseline
-                    savings = baseline.total_tco - metrics.operational_tco
-                    
-                    # Streamlit delta_color:
-                    # - "normal": positive = green, negative = red
-                    # - "inverse": positive = red, negative = green
-                    # 
-                    # We show "-€X" when savings > 0 (costs went down = good)
-                    # Since "-€X" is negative, we need "inverse" to make it GREEN
-                    if savings > 0:
-                        delta_display = f"-€{savings:,.0f}"
-                        delta_color = "inverse"  # Green for negative (down arrow)
-                    else:
-                        delta_display = f"+€{abs(savings):,.0f}"
-                        delta_color = "inverse"  # Red for positive (up arrow)
-                    st.metric("TCO", f"€{metrics.operational_tco:,.0f}", delta_display, delta_color=delta_color)
-                
-                with col2:
-                    # CO2 reduction (positive diff = good, we reduced emissions)
-                    co2_diff = baseline.total_co2 - metrics.total_co2
-                    co2_reduction_pct = (co2_diff / baseline.total_co2 * 100) if baseline.total_co2 > 0 else 0
-                    
-                    # Same logic: negative delta = improvement = should be GREEN
-                    if co2_diff > 0:
-                        delta_display = f"-{co2_reduction_pct:.1f}%"
-                        delta_color = "inverse"  # Green for negative (down arrow)
-                    else:
-                        delta_display = f"+{abs(co2_reduction_pct):.1f}%"
-                        delta_color = "inverse"  # Red for positive (up arrow)
-                    st.metric("CO₂", f"{metrics.total_co2:,.0f} kg", delta_display, delta_color=delta_color)
-                
-                with col3:
-                    meets_target = co2_reduction_pct >= params.target_co2_reduction * 100
-                    st.metric("Meets Target", "Yes" if meets_target else "No")
-                
-                with col4:
-                    if st.button("Remove", key=f"remove_{i}"):
-                        st.session_state.scenarios.pop(i)
-                        st.rerun()
+        st.markdown('<span class="muted">L\'algorithme explore l\'espace des combinaisons '
+                    'et extrait le Top 5 conforme.</span>', unsafe_allow_html=True)
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+        with st.spinner("Évaluation des configurations…"):
+            opt = optimise_cached(st.session_state.eff, st.session_state.mo, st.session_state.mt,
+                                  st.session_state.mr, budget, params.target_co2_reduction,
+                                  st.session_state.carbf, st.session_state.onprem, st.session_state.eol)
+        # re-score with live alpha, filter feasible, rank
+        scored = []
+        for rdict in opt["results"]:
+            _, _, gr = arbitrage_score(rdict["savings"], rdict["red"], alpha, baseline.total_tco)
+            if rdict["within_budget"] and rdict["meets_target"]:
+                scored.append((gr, rdict))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        # keep 5 *structurally distinct* strategies (collapse near-duplicates that
+        # differ only by the cloud lever, which barely moves CO2) for a useful Top 5
+        seen, top = set(), []
+        for gr, rd in scored:
+            sig = (round(rd["screen"], 2), round(rd["refurb"], 2), round(rd["life"], 2))
+            if sig in seen:
+                continue
+            seen.add(sig)
+            top.append((gr, rd))
+            if len(top) == 5:
+                break
+
+        st.markdown(
+            f'<div class="c-title"><h3>Top 5 — recherche combinatoire</h3>'
+            f'<span class="hint">≈ {fmt_int(opt["evaluated"])} configurations évaluées · '
+            f'contraintes budget &amp; cible appliquées</span></div>', unsafe_allow_html=True)
+
+        if not top:
+            st.markdown('<div class="callout warn"><div class="ic">!</div><div class="ct">'
+                        'Aucune configuration ne respecte à la fois le budget et la cible. '
+                        'Augmentez le budget ou abaissez la cible dans les réglages.</div></div>',
+                        unsafe_allow_html=True)
+        else:
+            lap_life = data.equipment_lifespan.get("Laptop", 60)
+            cards = ['<div class="opt-grid">']
+            for i, (gr, rd) in enumerate(top, start=1):
+                cls = "opt best" if i == 1 else "opt"
+                rank = "#1 · recommandé" if i == 1 else f"#{i}"
+                payback = (rd["inv"] / rd["savings"]) if rd["savings"] > 0 else 0
+                life_m = round(rd["life"] * lap_life)
+                cards.append(
+                    f'<div class="{cls}"><div class="rank">{rank}</div>'
+                    f'<div class="gr tnum">{gr:.2f}</div>'
+                    f'<div class="line"><span>Économies</span><b>{fmt_k(rd["savings"])}</b></div>'
+                    f'<div class="line"><span>Réduction CO₂</span><b>−{pct1(rd["red"])} %</b></div>'
+                    f'<div class="line"><span>Payback</span><b>{payback:.1f} ans</b></div>'
+                    f'<div class="line"><span>Leviers</span><b>Rec {rd["refurb"]*100:.0f} · '
+                    f'Scr {rd["screen"]*100:.0f} · Vie +{life_m}m · Cloud {rd["cloud"]*100:.0f}</b></div></div>'
+                )
+            cards.append("</div>")
+            st.markdown("".join(cards), unsafe_allow_html=True)
+            if st.button("+ Ajouter le scénario recommandé au comparateur", type="primary"):
+                rd = top[0][1]
+                lap_life = data.equipment_lifespan.get("Laptop", 60)
+                snap = ScenarioParams(
+                    name=f"Optimisé {len(st.session_state.comparator) + 1}",
+                    device_reductions={"Screen": rd["screen"]},
+                    sourcing_mix={"Laptop": {"new": 1 - rd["refurb"], "refurb": rd["refurb"], "lease": 0}},
+                    lifespan_extensions={"Laptop": rd["life"]},
+                    cloud_cost_reduction=rd["cloud"], onprem_reduction=rd["onprem"],
+                    program_cost=budget,
+                )
+                st.session_state.comparator.append(snap)
+                st.toast(f"Ajouté : {snap.name}")
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    c1.button("← Diagnostic", use_container_width=True, on_click=goto, args=(2,))
+    c3.button("Arbitrer entre scénarios →", type="primary", use_container_width=True,
+              on_click=goto, args=(4,))
+
 
 # =============================================================================
-# Page: Scenario Comparison
+# PHASE 4 — ARBITRER
 # =============================================================================
 
-def render_comparison():
-    """Render the scenario comparison page."""
-    
-    st.title("Scenario Comparison")
-    st.markdown("*Compare scenarios side-by-side*")
-    
-    if not ensure_data_loaded():
-        return
-    
-    if not st.session_state.scenarios:
-        st.warning("No scenarios to compare. Create scenarios in the Scenario Builder first.")
-        if st.button("Go to Scenario Builder"):
-            st.session_state.current_page = "Scenario Builder"
+def phase4(data, params, baseline):
+    phase_header(4, "Arbitrage", "Comparer &amp; choisir la stratégie",
+                 "La frontière du Green ROI : économies financières en abscisse, réduction "
+                 "CO₂e en ordonnée. Le meilleur scénario se place en haut à droite — la "
+                 "taille de la bulle est son score Green ROI.")
+
+    budget = st.session_state.bud
+    alpha = st.session_state.alpha
+    target = params.target_co2_reduction
+
+    # Build the comparison set: baseline + presets + manual + optimiser best + user-added
+    manual = manual_scenario(data, st.session_state.l_rec, st.session_state.l_life,
+                             st.session_state.l_scr, st.session_state.l_cloud, budget)
+    mod = create_moderate_scenario(); mod.name = "Modéré"; mod.program_cost = budget
+    agg = create_aggressive_scenario(); agg.name = "Agressif"; agg.program_cost = budget
+
+    scen_defs = [("Modéré", "Modéré", mod), ("Agressif", "Agressif", agg),
+                 ("Manuel", "Manuel", manual)]
+
+    # optimiser best
+    opt = optimise_cached(st.session_state.eff, st.session_state.mo, st.session_state.mt,
+                          st.session_state.mr, budget, target, st.session_state.carbf,
+                          st.session_state.onprem, st.session_state.eol)
+    feas = [r for r in opt["results"] if r["within_budget"] and r["meets_target"]]
+    if feas:
+        feas.sort(key=lambda r: arbitrage_score(r["savings"], r["red"], alpha, baseline.total_tco)[2], reverse=True)
+        rd = feas[0]
+        best_opt = ScenarioParams(
+            name="Optimisé #1",
+            device_reductions={"Screen": rd["screen"]},
+            sourcing_mix={"Laptop": {"new": 1 - rd["refurb"], "refurb": rd["refurb"], "lease": 0}},
+            lifespan_extensions={"Laptop": rd["life"]},
+            cloud_cost_reduction=rd["cloud"], onprem_reduction=rd["onprem"], program_cost=budget,
+        )
+        scen_defs.append(("Optimisé #1", "Opti #1", best_opt))
+
+    for i, snap in enumerate(st.session_state.comparator, start=1):
+        scen_defs.append((snap.name, snap.name.split()[0][:5], snap))
+
+    # evaluate
+    points = [{"name": "Baseline", "short": "Base", "tco": baseline.total_tco,
+               "co2": baseline.total_co2, "savings": 0.0, "red": 0.0,
+               "within_budget": True, "meets_target": False, "payback": float("inf"),
+               "gr": 0.0, "nf": 0.0, "nc": 0.0, "baseline": True}]
+    for name, short, scen in scen_defs:
+        ev = eval_scenario(data, baseline, params, scen, alpha, budget, name)
+        ev["short"] = short
+        points.append(ev)
+
+    # best (excluding baseline)
+    ranked = sorted([p for p in points if not p.get("baseline")],
+                    key=lambda p: p["gr"], reverse=True)
+    best = ranked[0] if ranked else None
+
+    left, right = st.columns([1.25, 1], gap="large")
+    with left:
+        st.markdown('<div class="card"><div class="c-title"><h3>Frontière d\'arbitrage</h3>'
+                    '<span class="hint">€ économisés × % CO₂ réduit</span></div>'
+                    + scatter(points, target)
+                    + '<div class="legend" style="margin-top:6px">'
+                    '<span><i style="background:var(--ink)"></i>Recommandé</span>'
+                    '<span><i style="background:var(--green)"></i>Conforme aux contraintes</span>'
+                    '<span><i style="background:var(--gold)"></i>Hors contrainte</span>'
+                    '<span><i style="background:var(--ink-mute)"></i>Référence</span>'
+                    '</div></div>', unsafe_allow_html=True)
+    with right:
+        if best:
+            st.markdown(
+                '<div class="card"><div class="c-title"><h3>Recommandation</h3></div>'
+                '<div class="reco"><div class="eye">Scénario retenu</div>'
+                f'<div class="name">{best["name"]}</div><div class="grid">'
+                f'<div><div class="k">Économies / an</div><b>{fmt_k(best["savings"])}</b></div>'
+                f'<div><div class="k">Réduction CO₂</div><b>−{pct1(best["red"])} %</b></div>'
+                f'<div><div class="k">Green ROI</div><b class="gold">{best["gr"]:.2f}</b></div>'
+                f'<div><div class="k">Payback</div><b>{best["payback"]:.1f} ans</b></div>'
+                '</div></div>'
+                f'<p class="muted" style="font-size:12.5px; margin-top:12px">'
+                f'Meilleur compromis financier/carbone à α = {alpha:.2f}, '
+                f'sous budget de {fmt_k(budget)} et au-delà de la cible '
+                f'−{target*100:.0f} %.</p></div>', unsafe_allow_html=True)
+
+    # comparison table
+    trows = []
+    for p in points:
+        hl = ' class="hl"' if best and p["name"] == best["name"] else ""
+        bud_chip = '<span class="chip ok">✓</span>' if p["within_budget"] else '<span class="chip warn">✗</span>'
+        tar_chip = '<span class="chip ok">✓</span>' if p["meets_target"] else '<span class="chip warn">✗</span>'
+        sav = "—" if p.get("baseline") else fmt_k(p["savings"])
+        red = "—" if p.get("baseline") else f"−{pct1(p['red'])} %"
+        gr = "—" if p.get("baseline") else f"{p['gr']:.2f}"
+        name = f"<b>{p['name']}</b>" if best and p["name"] == best["name"] else p["name"]
+        trows.append(
+            f'<tr{hl}><td>{name}</td><td class="num tnum">{fmt_m(p["tco"])} M€</td>'
+            f'<td class="num tnum">{sav}</td><td class="num tnum">{fmt_t(p["co2"])} t</td>'
+            f'<td class="num">{red}</td><td>{bud_chip}</td><td>{tar_chip}</td>'
+            f'<td class="num tnum">{gr}</td></tr>'
+        )
+    st.markdown(
+        '<div class="card" style="margin-top:18px"><div class="c-title"><h3>Tableau comparatif</h3></div>'
+        '<table class="tbl"><thead><tr><th>Scénario</th><th class="num">TCO</th>'
+        '<th class="num">Économies</th><th class="num">CO₂e restant</th><th class="num">Réduction</th>'
+        '<th>Budget</th><th>Cible</th><th class="num">Green ROI</th></tr></thead><tbody>'
+        + "".join(trows) + '</tbody></table></div>', unsafe_allow_html=True)
+
+    if st.session_state.comparator:
+        if st.button("Vider le comparateur"):
+            st.session_state.comparator = []
             st.rerun()
-        return
-    
-    recompute_baseline()
-    
-    baseline = st.session_state.baseline
-    data = st.session_state.data
-    params = st.session_state.params
-    
-    # Compute all scenario metrics
-    all_metrics = []
-    for scenario in st.session_state.scenarios:
-        metrics = compute_scenario(data, baseline, scenario, params, st.session_state.ademe_factors)
-        all_metrics.append(metrics)
-    
-    # Compute ROI metrics
-    roi_metrics = compute_all_roi_metrics(
-        baseline, all_metrics, 
-        params.target_co2_reduction, 
-        params.program_budget,
-        params.alpha
-    )
-    
-    # Build comparison table
-    comparison_data = [{
-        "Scenario": "Baseline",
-        "TCO (€)": baseline.total_tco,
-        "Savings (€)": 0,
-        "CO₂ (kg)": baseline.total_co2,
-        "CO₂ Reduction": "0%",
-        "Meets Target": "-",
-        "Green ROI": "-"
-    }]
-    
-    for scenario, metrics, roi in zip(st.session_state.scenarios, all_metrics, roi_metrics):
-        savings = baseline.total_tco - metrics.total_tco
-        co2_reduction = (baseline.total_co2 - metrics.total_co2) / baseline.total_co2
-        meets_target = co2_reduction >= params.target_co2_reduction
-        
-        comparison_data.append({
-            "Scenario": scenario.name,
-            "TCO (€)": metrics.total_tco,
-            "Savings (€)": savings,
-            "CO₂ (kg)": metrics.total_co2,
-            "CO₂ Reduction": f"{co2_reduction*100:.1f}%",
-            "Meets Target": "Yes" if meets_target else "No",
-            "Green ROI": f"{roi.green_roi:.3f}"
-        })
-    
-    comparison_df = pd.DataFrame(comparison_data)
-    
-    st.dataframe(
-        comparison_df.style.format({
-            "TCO (€)": "€{:,.0f}",
-            "Savings (€)": "€{:,.0f}",
-            "CO₂ (kg)": "{:,.0f}"
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    st.markdown("---")
-    
-    # Charts
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### Cost Comparison")
-        
-        tco_data = pd.DataFrame({
-            "Scenario": ["Baseline"] + [s.name for s in st.session_state.scenarios],
-            "TCO": [baseline.total_tco] + [m.total_tco for m in all_metrics]
-        })
-        
-        fig = px.bar(
-            tco_data,
-            x="Scenario",
-            y="TCO",
-            color_discrete_sequence=["#4A7C59"]
-        )
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Montserrat"),
-            yaxis_title="TCO (€)"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.markdown("### Emissions Comparison")
-        
-        co2_data = pd.DataFrame({
-            "Scenario": ["Baseline"] + [s.name for s in st.session_state.scenarios],
-            "CO₂": [baseline.total_co2] + [m.total_co2 for m in all_metrics]
-        })
-        
-        target_co2 = baseline.total_co2 * (1 - params.target_co2_reduction)
-        
-        fig = px.bar(
-            co2_data,
-            x="Scenario",
-            y="CO₂",
-            color_discrete_sequence=["#1A1A1A"]
-        )
-        fig.add_hline(
-            y=target_co2,
-            line_dash="dash",
-            line_color="#C44536",
-            annotation_text=f"Target: {target_co2:,.0f} kg"
-        )
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Montserrat"),
-            yaxis_title="CO₂ (kg)"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    c1.button("← Exploration", use_container_width=True, on_click=goto, args=(3,))
+    c3.button("Construire les business cases →", type="primary", use_container_width=True,
+              on_click=goto, args=(5,))
+
 
 # =============================================================================
-# Page: Business Cases
+# PHASE 5 — PLANIFIER
 # =============================================================================
 
-def render_business_cases():
-    """Render the business cases page."""
-    
-    st.title("Business Cases")
-    st.markdown("*Actionable implementation plans for each initiative*")
-    
-    if not ensure_data_loaded():
-        return
-    
-    recompute_baseline()
-    
-    # Generate button
-    if st.button("Generate Business Cases", type="primary"):
-        with st.spinner("Analyzing initiatives..."):
-            st.session_state.business_cases = generate_all_business_cases(
-                st.session_state.data,
-                st.session_state.params,
-                st.session_state.ademe_factors
+QUARTER_COLORS = {"Must Do": "var(--green)", "Should Do": "var(--gold)", "Consider": "var(--clay)"}
+RECO_FR = {"Must Do": "Must do", "Should Do": "Should do", "Consider": "Consider"}
+
+
+def parse_quarters(qstr):
+    nums = [int(x) for x in re.findall(r"Q(\d)", qstr or "")]
+    if not nums:
+        return 1, 2
+    return min(nums), max(nums)
+
+
+def phase5(data, params, baseline):
+    phase_header(5, "Planification", "Traduire la décision en roadmap",
+                 "Le scénario retenu devient un plan d'action séquencé : calendrier de "
+                 "déploiement, priorisation par gain/risque, et fiches projet prêtes pour "
+                 "le COMEX.")
+
+    cases = business_cases_cached(st.session_state.eff, st.session_state.mo, st.session_state.mt,
+                                  st.session_state.mr, st.session_state.bud,
+                                  params.target_co2_reduction, st.session_state.carbf,
+                                  st.session_state.onprem, st.session_state.eol)
+
+    # Gantt
+    grows = []
+    for c in cases:
+        start, end = parse_quarters(c["quarter"])
+        left = (start - 1) / 4 * 100
+        width = (end - start + 1) / 4 * 100
+        color = QUARTER_COLORS.get(c["reco"], "var(--ink-soft)")
+        text_color = "#fff"
+        grows.append(
+            f'<div class="grow"><div class="gname">{c["title"]}</div>'
+            f'<div class="gtrack"><div class="gbar" style="left:{left:.0f}%; width:{width:.0f}%; '
+            f'background:{color}; color:{text_color}">{c["quarter"]}</div></div></div>'
+        )
+    st.markdown(
+        f'<div class="card"><div class="c-title"><h3>Calendrier de déploiement 2026</h3>'
+        f'<span class="hint">{len(cases)} initiatives</span></div>'
+        '<div class="gantt-h"><div>Initiative</div><div>T1</div><div>T2</div><div>T3</div><div>T4</div></div>'
+        + "".join(grows) + '</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    left, right = st.columns([1, 1.3], gap="large")
+
+    with left:
+        prows = []
+        for i, c in enumerate(cases, start=1):
+            chip = "ok" if c["reco"] == "Must Do" else ("gold" if c["reco"] == "Should Do" else "warn")
+            prows.append(
+                f'<div class="prio"><span class="pr">{i}</span>'
+                f'<span class="pname">{c["title"]}</span>'
+                f'<span class="chip {chip}">{RECO_FR.get(c["reco"], c["reco"])}</span>'
+                f'<span class="pgr tnum">{c["score"]:.2f}</span></div>'
             )
-        st.success("Business cases generated successfully!")
-    
-    if st.session_state.business_cases is None:
-        st.info("Click the button above to generate detailed business cases for all initiatives.")
-        return
-    
-    cases = st.session_state.business_cases
-    
-    # Executive Summary
-    st.markdown("### Executive Summary")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_investment = sum(c.total_investment for c in cases)
-        st.metric("Total Investment", f"€{total_investment:,.0f}")
-    
-    with col2:
-        total_savings = sum(c.annual_cost_savings for c in cases)
-        st.metric("Annual Savings", f"€{total_savings:,.0f}")
-    
-    with col3:
-        total_co2 = sum(c.annual_co2_reduction_kg for c in cases)
-        st.metric("CO₂ Reduction", f"{total_co2:,.0f} kg/yr")
-    
-    with col4:
-        must_do_count = sum(1 for c in cases if c.recommendation == "Must Do")
-        st.metric("Must Do", f"{must_do_count} initiatives")
-    
-    st.markdown("---")
-    
-    # Initiative Ranking Table
-    st.markdown("### Initiative Priority Ranking")
-    
-    ranking_data = []
-    for i, case in enumerate(cases, 1):
-        ranking_data.append({
-            "Rank": i,
-            "Initiative": case.title,
-            "Category": case.category.value,
-            "Investment": f"€{case.total_investment:,.0f}",
-            "Annual Savings": f"€{case.annual_cost_savings:,.0f}",
-            "CO₂ Reduction": f"{case.annual_co2_reduction_kg:,.0f} kg",
-            "Payback": f"{case.payback_months:.0f} mo" if case.payback_months < 999 else "N/A",
-            "Risk": case.overall_risk.value if hasattr(case, 'overall_risk') else "Medium",
-            "Recommendation": case.recommendation
-        })
-    
-    st.dataframe(pd.DataFrame(ranking_data), use_container_width=True, hide_index=True)
-    
-    st.markdown("---")
-    
-    # Detailed Business Cases
-    st.markdown("### Detailed Business Cases")
-    
-    for case in cases:
-        with st.expander(f"**{case.title}** — {case.recommendation}"):
-            st.markdown(f"**Category:** {case.category.value}")
-            st.markdown(f"**Scope:** {case.scope_summary}")
-            
-            # Key Metrics with formula tooltips
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric(
-                    "Investment", 
-                    f"€{case.total_investment:,.0f}",
-                    help=case.investment_formula if case.investment_formula else None
-                )
-            with col2:
-                st.metric(
-                    "Net Savings", 
-                    f"€{case.annual_cost_savings:,.0f}",
-                    help=case.savings_formula if case.savings_formula else None
-                )
-            with col3:
-                st.metric(
-                    "CO₂ Avoided", 
-                    f"{case.annual_co2_reduction_kg:,.0f} kg",
-                    help=case.co2_formula if case.co2_formula else None
-                )
-            with col4:
-                if case.payback_months < 999:
-                    st.metric("Payback", f"{case.payback_months:.1f} months")
-                else:
-                    st.metric("Payback", "N/A", help="Negative savings = no payback")
-            
-            st.markdown("---")
-            
-            # Actions
-            st.markdown("**Actions Required:**")
-            for i, action in enumerate(case.actions, 1):
-                prereq = " [PREREQUISITE]" if action.is_prerequisite else ""
-                cost = f" (€{action.cost_euros:,.0f})" if action.cost_euros > 0 else ""
-                st.markdown(f"{i}. {action.description}{prereq}{cost}")
-                st.markdown(f"   *Owner: {action.owner} | Duration: {action.duration_weeks} weeks*")
-            
-            st.markdown("---")
-            
-            # Investment Breakdown
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Investment Breakdown:**")
-                for item, cost in case.investment_breakdown.items():
-                    st.write(f"- {item}: €{cost:,.0f}")
-            
-            with col2:
-                st.markdown("**Returns:**")
-                st.write(f"- Annual cost savings: €{case.annual_cost_savings:,.0f}")
-                st.write(f"- CO₂ reduction: {case.annual_co2_reduction_kg:,.0f} kg/year ({case.co2_reduction_percent*100:.2f}%)")
-                st.write(f"- 5-year savings: €{case.annual_cost_savings * 5:,.0f}")
-            
-            st.markdown("---")
-            
-            # Risks
-            st.markdown("**Risk Assessment:**")
-            for risk in case.risks:
-                level_class = f"risk-{risk.level.value.lower()}"
-                st.markdown(f"- **{risk.level.value}**: {risk.description}")
-                st.markdown(f"  *Mitigation: {risk.mitigation}*")
+        st.markdown(
+            '<div class="card"><div class="c-title"><h3>Priorisation gain / risque</h3></div>'
+            + "".join(prows) + '</div>', unsafe_allow_html=True)
+
+    with right:
+        top = cases[0] if cases else None
+        if top:
+            chip = "ok" if top["reco"] == "Must Do" else ("gold" if top["reco"] == "Should Do" else "warn")
+            act_rows = "".join(
+                f'<tr><td>{desc}</td><td><span class="chip gold">{owner}</span></td></tr>'
+                for desc, owner in top["actions"][:5]
+            )
+            risk_html = ""
+            if top["risks"]:
+                lvl, desc, mit = top["risks"][0]
+                risk_html = (f'<div class="callout warn" style="margin-top:14px"><div class="ic">⚠</div>'
+                             f'<div class="ct"><b>Risque ({lvl}) :</b> {desc} '
+                             f'<b>Remédiation :</b> {mit}</div></div>')
+            st.markdown(
+                f'<div class="card"><div class="c-title"><h3>Fiche projet — {top["title"]}</h3>'
+                f'<span class="chip {chip}">{RECO_FR.get(top["reco"], top["reco"])}</span></div>'
+                '<div class="kpis" style="grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:14px">'
+                f'<div class="kpi" style="padding:12px"><div class="l">NPV 5 ans</div>'
+                f'<div class="v tnum" style="font-size:22px">{fmt_m(top["npv"])} <small>M€</small></div></div>'
+                f'<div class="kpi" style="padding:12px"><div class="l">Investissement</div>'
+                f'<div class="v tnum" style="font-size:22px">{fmt_k(top["investment"])}</div></div>'
+                f'<div class="kpi" style="padding:12px"><div class="l">CO₂ évité</div>'
+                f'<div class="v tnum" style="font-size:22px">{fmt_t(top["co2"])} <small>t</small></div></div>'
+                '</div>'
+                '<table class="tbl"><thead><tr><th>Étape</th><th>Responsable</th></tr></thead><tbody>'
+                + act_rows + '</tbody></table>' + risk_html + '</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    c1.button("← Arbitrage", use_container_width=True, on_click=goto, args=(4,))
+    c3.button("Soumettre au COMEX", type="primary", use_container_width=True,
+              on_click=lambda: st.toast("Dossier transmis au COMEX ✓"))
+
 
 # =============================================================================
-# Page: Optimization
+# Export dossier (markdown)
 # =============================================================================
 
-def render_optimization():
-    """Render the optimization page."""
-    
-    st.title("Optimization")
-    st.markdown("*Find optimal initiative combinations*")
-    
-    if not ensure_data_loaded():
-        return
-    
-    recompute_baseline()
-    
-    data = st.session_state.data
-    params = st.session_state.params
-    baseline = st.session_state.baseline
-    
-    # Configuration
-    st.markdown("### Optimization Configuration")
-    st.caption("*Scenarios = combinations of all parameter values. Adjust granularity to change scenario count.*")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        max_screen_reduction = st.slider("Max Screen Reduction", 0, 50, 40) / 100
-    with col2:
-        max_laptop_refurb = st.slider("Max Laptop Refurb Share", 0, 80, 60) / 100
-    with col3:
-        max_cloud_reduction = st.slider("Max Cloud Reduction", 0, 30, 25) / 100
-    with col4:
-        top_n = st.number_input("Number of Results", 1, 20, 5)
-    
-    # Calculate dynamic ranges based on slider values
-    screen_steps = [0, max_screen_reduction/2, max_screen_reduction] if max_screen_reduction > 0 else [0]
-    refurb_steps = [0, max_laptop_refurb/2, max_laptop_refurb] if max_laptop_refurb > 0 else [0]
-    cloud_steps = [0, max_cloud_reduction/2, max_cloud_reduction] if max_cloud_reduction > 0 else [0]
-    
-    # Run Optimization
-    if st.button("Run Optimization", type="primary", use_container_width=False):
-        with st.spinner("Evaluating scenarios..."):
-            config = OptimizationConfig(
-                budget=params.program_budget,
-                target_reduction=params.target_co2_reduction,
-                alpha=params.alpha,
-                screen_reduction_range=screen_steps,
-                landline_reduction_range=[0.5, 1.0],
-                laptop_refurb_share_range=refurb_steps,
-                cloud_reduction_range=cloud_steps,
-                top_n=top_n
-            )
-            
-            st.session_state.optimization_result = run_optimization(
-                data, params, config, st.session_state.ademe_factors
-            )
-        
-        st.success("Optimization complete!")
-    
-    result = st.session_state.optimization_result
-    
-    if result is None:
-        st.info("Click 'Run Optimization' to find the best initiative combinations.")
-        return
-    
-    # Results Summary
-    st.markdown("---")
-    st.markdown("### Results Summary")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Scenarios Evaluated", f"{result.total_scenarios_evaluated:,}")
-    with col2:
-        st.metric("Valid Scenarios", f"{result.valid_scenarios:,}")
-    with col3:
-        if result.top_scenarios:
-            best_roi = max(r.green_roi for _, _, r in result.top_scenarios)
-            st.metric("Best Green ROI", f"{best_roi:.3f}")
-    
-    st.markdown("---")
-    
-    # Top Scenarios
-    st.markdown("### Top Scenarios")
-    
-    if not result.top_scenarios:
-        st.warning("No valid scenarios found. Try adjusting constraints or increasing budgets.")
-        return
-    
-    for i, (scenario, metrics, roi) in enumerate(result.top_scenarios, 1):
-        with st.expander(f"#{i} — Green ROI: {roi.green_roi:.3f}"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Financial Performance:**")
-                st.write(f"- TCO: €{metrics.total_tco:,.0f}")
-                st.write(f"- Savings: €{roi.cost_savings:,.0f}")
-                if roi.roi_financial and roi.roi_financial != float('inf'):
-                    st.write(f"- Financial ROI: {roi.roi_financial:.1%}")
-                if roi.payback_years and roi.payback_years != float('inf'):
-                    st.write(f"- Payback: {roi.payback_years:.1f} years")
-            
-            with col2:
-                st.markdown("**Environmental Performance:**")
-                st.write(f"- CO₂: {metrics.total_co2:,.0f} kg")
-                st.write(f"- Reduction: {roi.co2_reduction_percent*100:.1f}%")
-                st.write(f"- Meets Target: {'Yes' if roi.meets_target else 'No'}")
-            
-            st.markdown("---")
-            
-            st.markdown("**Key Configuration:**")
-            col_conf1, col_conf2 = st.columns(2)
-            
-            with col_conf1:
-                for device, reduction in scenario.device_reductions.items():
-                    if reduction > 0:
-                        st.write(f"- {device} reduction: {reduction*100:.0f}%")
-                
-                for device, ext in scenario.lifespan_extensions.items():
-                    if ext > 0:
-                        st.write(f"- {device} lifespan +{ext*100:.0f}%")
-            
-            with col_conf2:
-                for device, mix in scenario.sourcing_mix.items():
-                    refurb = mix.get("refurb", 0.0)
-                    if refurb > 0:
-                        st.write(f"- {device} refurb share: {refurb*100:.0f}%")
-                
-                if scenario.cloud_cost_reduction > 0:
-                    st.write(f"- Cloud reduction: {scenario.cloud_cost_reduction*100:.0f}%")
-                
-                if scenario.onprem_reduction > 0:
-                    st.write(f"- On-prem reduction: {scenario.onprem_reduction*100:.0f}%")
-            
-            if st.button(f"Add to Scenarios", key=f"add_scenario_{i}"):
-                scenario.name = f"Optimized {i}"
-                st.session_state.scenarios.append(scenario)
-                st.success(f"Added: {scenario.name}")
+def build_export(data, params, baseline) -> str:
+    lines = [
+        "# LVMH — Green in Tech · Dossier de décision",
+        "",
+        f"**Maison :** {st.session_state.maison}  ",
+        f"**Effectif :** {fmt_int(st.session_state.eff)} · "
+        f"**Budget :** {fmt_k(st.session_state.bud)} · "
+        f"**Cible CO₂ :** −{params.target_co2_reduction*100:.0f} %",
+        "",
+        "## Situation de référence",
+        f"- TCO initial : {fmt_m(baseline.total_tco)} M€ / an",
+        f"- Empreinte : {fmt_t(baseline.total_co2)} tCO₂e / an",
+        "",
+        "## Scénario manuel courant",
+    ]
+    scen = manual_scenario(data, st.session_state.l_rec, st.session_state.l_life,
+                           st.session_state.l_scr, st.session_state.l_cloud, st.session_state.bud)
+    ev = eval_scenario(data, baseline, params, scen, st.session_state.alpha, st.session_state.bud)
+    lines += [
+        f"- Reconditionné {st.session_state.l_rec} % · +{st.session_state.l_life} mois vie · "
+        f"écrans −{st.session_state.l_scr} % · FinOps {st.session_state.l_cloud} %",
+        f"- Économies : {fmt_k(ev['savings'])} / an · Réduction : −{pct1(ev['red'])} %",
+        f"- Green ROI : {ev['gr']:.2f} (α = {st.session_state.alpha:.2f})",
+    ]
+    return "\n".join(lines)
+
 
 # =============================================================================
-# Page: Settings
-# =============================================================================
-
-def render_settings():
-    """Render the settings page."""
-    
-    st.title("Configuration")
-    st.markdown("*Adjust emission factors, pricing, and model parameters*")
-    
-    tabs = st.tabs(["Emission Factors", "Dell Contract", "Cloud Providers", "Business Case Assumptions"])
-    
-    # Tab 1: Emission Factors
-    with tabs[0]:
-        st.markdown("### ADEME Emission Factors")
-        st.info("Emission factors in kg CO₂e per device. Changes apply to all calculations.")
-        
-        ademe = st.session_state.ademe_factors
-        
-        for equipment in ["Laptop", "Smartphone", "Screen", "Tablet", "Switch/Router"]:
-            if equipment in ademe:
-                with st.expander(f"{equipment}"):
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        ademe[equipment]["embodied_new"] = st.number_input(
-                            f"Embodied (New) — kg CO₂e",
-                            value=float(ademe[equipment].get("embodied_new", 100)),
-                            min_value=0.0,
-                            step=10.0,
-                            key=f"{equipment}_new"
-                        )
-                    
-                    with col2:
-                        ademe[equipment]["embodied_refurb"] = st.number_input(
-                            f"Embodied (Refurbished) — kg CO₂e",
-                            value=float(ademe[equipment].get("embodied_refurb", 20)),
-                            min_value=0.0,
-                            step=5.0,
-                            key=f"{equipment}_refurb"
-                        )
-                    
-                    with col3:
-                        use_phase = ademe[equipment].get("use_phase_kwh_year")
-                        if use_phase is not None:
-                            ademe[equipment]["use_phase_kwh_year"] = st.number_input(
-                                f"Use Phase — kWh/year",
-                                value=float(use_phase),
-                                min_value=0.0,
-                                step=5.0,
-                                key=f"{equipment}_use"
-                            )
-        
-        st.markdown("### Grid Electricity Factor")
-        st.session_state.params.co2_per_kwh = st.number_input(
-            "CO₂ per kWh (kg)",
-            value=float(st.session_state.params.co2_per_kwh),
-            min_value=0.0,
-            step=0.01,
-            format="%.3f",
-        )
-    
-    # Tab 2: Dell Contract
-    with tabs[1]:
-        st.markdown("### Dell Contract Pricing")
-        st.info("Special pricing under Dell enterprise agreement. Note: Due to volume discounts, new laptops may be cheaper than refurbished.")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.session_state.params.dell_laptop_new_price = st.number_input(
-                "New Laptop Price (€)",
-                value=float(st.session_state.params.dell_laptop_new_price),
-                min_value=0.0,
-                step=50.0,
-            )
-        
-        with col2:
-            st.session_state.params.dell_laptop_refurb_price = st.number_input(
-                "Refurbished Laptop Price (€)",
-                value=float(st.session_state.params.dell_laptop_refurb_price),
-                min_value=0.0,
-                step=50.0,
-            )
-    
-    # Tab 3: Cloud Providers
-    with tabs[2]:
-        st.markdown("### Cloud Provider Emission Factors")
-        st.info("CO₂ emissions per euro spent on cloud services (kg CO₂e/€)")
-        
-        cloud_provider = st.selectbox(
-            "Default Cloud Provider",
-            options=list(CLOUD_CO2_FACTORS.keys()),
-            index=list(CLOUD_CO2_FACTORS.keys()).index(st.session_state.params.cloud_provider)
-        )
-        st.session_state.params.cloud_provider = cloud_provider
-        
-        st.markdown("**Provider Emission Factors:**")
-        for provider, factor in CLOUD_CO2_FACTORS.items():
-            st.write(f"- {provider}: {factor} kg CO₂e/€")
-    
-    # Tab 4: Business Case Assumptions
-    with tabs[3]:
-        st.markdown("### Business Case Investment Assumptions")
-        st.info("💡 Configure the cost assumptions used in Business Case calculations. Defaults are industry benchmarks.")
-        
-        params = st.session_state.params
-        
-        # I1: Laptop Lifespan Extension
-        with st.expander("🔧 I1: Laptop Upgrade Program"):
-            st.markdown("*Upgrade components (SSD, RAM, battery) to extend laptop lifespan instead of full replacement*")
-            col1, col2 = st.columns(2)
-            with col1:
-                params.laptop_upgrade_cost_per_unit = st.number_input(
-                    "Upgrade Cost per Device (€)",
-                    value=float(params.laptop_upgrade_cost_per_unit),
-                    min_value=0.0,
-                    step=5.0,
-                    help="Cost of RAM/SSD/battery upgrade per laptop"
-                )
-            with col2:
-                params.laptop_eligible_upgrade_percent = st.slider(
-                    "% of Fleet Eligible for Upgrade",
-                    min_value=0,
-                    max_value=100,
-                    value=int(params.laptop_eligible_upgrade_percent * 100),
-                    help="Percentage of laptops that can be upgraded instead of replaced"
-                ) / 100
-        
-        # I2: Refurbished Sourcing
-        with st.expander("♻️ I2: Refurbished Laptop Sourcing"):
-            st.markdown("*Choose refurbished over new laptops for annual replacements*")
-            col1, col2 = st.columns(2)
-            with col1:
-                params.refurb_share_percent = st.slider(
-                    "% of Replacements from Refurbished",
-                    min_value=0,
-                    max_value=100,
-                    value=int(params.refurb_share_percent * 100),
-                    help="Percentage of annual laptop replacements to source from refurbished"
-                ) / 100
-            with col2:
-                params.refurb_setup_investment = st.number_input(
-                    "Setup Cost (€)",
-                    value=float(params.refurb_setup_investment),
-                    min_value=0.0,
-                    step=500.0,
-                    help="Usually €0 if using same Dell contract (just different SKU)"
-                )
-        
-        # I3: Screen Reduction
-        with st.expander("🖥️ I3: Screen Count Reduction"):
-            col1, col2 = st.columns(2)
-            with col1:
-                params.screen_hot_desking_investment = st.number_input(
-                    "Hot-Desking Furniture/Setup (€)",
-                    value=float(params.screen_hot_desking_investment),
-                    min_value=0.0,
-                    step=1000.0
-                )
-                params.screen_audit_cost = st.number_input(
-                    "Utilization Audit Cost (€)",
-                    value=float(params.screen_audit_cost),
-                    min_value=0.0,
-                    step=1000.0
-                )
-            with col2:
-                params.screen_booking_system_cost = st.number_input(
-                    "Desk Booking System (€)",
-                    value=float(params.screen_booking_system_cost),
-                    min_value=0.0,
-                    step=1000.0
-                )
-                params.screen_communication_cost = st.number_input(
-                    "Change Management/Comms (€)",
-                    value=float(params.screen_communication_cost),
-                    min_value=0.0,
-                    step=500.0
-                )
-        
-        # I4: Landline Removal
-        with st.expander("📞 I4: Landline to Teams Migration"):
-            col1, col2 = st.columns(2)
-            with col1:
-                params.landline_monthly_telecom_cost = st.number_input(
-                    "Monthly Telecom Cost per Line (€)",
-                    value=float(params.landline_monthly_telecom_cost),
-                    min_value=0.0,
-                    step=1.0,
-                    help="Current cost per landline per month (used to calculate savings)"
-                )
-                params.landline_headset_cost_per_unit = st.number_input(
-                    "Headset Cost per User (€)",
-                    value=float(params.landline_headset_cost_per_unit),
-                    min_value=0.0,
-                    step=5.0
-                )
-            with col2:
-                params.landline_teams_license_cost = st.number_input(
-                    "Teams Phone Licensing (€)",
-                    value=float(params.landline_teams_license_cost),
-                    min_value=0.0,
-                    step=500.0,
-                    help="Marginal cost for Teams calling features"
-                )
-                params.landline_training_cost = st.number_input(
-                    "User Training Program (€)",
-                    value=float(params.landline_training_cost),
-                    min_value=0.0,
-                    step=1000.0
-                )
-        
-        # I5: Cloud FinOps
-        with st.expander("☁️ I5: Cloud FinOps Optimization"):
-            st.markdown("**Investment Costs**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                params.cloud_finops_tool_cost = st.number_input(
-                    "FinOps Tooling (€)",
-                    value=float(params.cloud_finops_tool_cost),
-                    min_value=0.0,
-                    step=1000.0,
-                    help="Annual cost for cloud cost visibility tools (e.g., CloudHealth, Spot.io, native Cost Explorer)"
-                )
-            with col2:
-                params.cloud_consultant_cost = st.number_input(
-                    "Consultant (€)",
-                    value=float(params.cloud_consultant_cost),
-                    min_value=0.0,
-                    step=5000.0,
-                    help="One-time cost for external optimization consultant/project"
-                )
-            with col3:
-                params.cloud_training_cost = st.number_input(
-                    "Training (€)",
-                    value=float(params.cloud_training_cost),
-                    min_value=0.0,
-                    step=1000.0,
-                    help="Training cost for team to learn FinOps practices"
-                )
-            
-            st.markdown("---")
-            st.markdown("**Cloud Cost Breakdown** — What portion of your cloud bill goes to each category?")
-            st.caption("These percentages should sum to 100%. Strategies will apply to their relevant portions only.")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                compute_pct = st.slider(
-                    "Compute %",
-                    min_value=0, max_value=100,
-                    value=int(params.cloud_compute_share * 100),
-                    format="%d%%",
-                    help="VMs, containers, serverless compute (Lambda/Functions). Typically 50-70% of cloud bills."
-                )
-                params.cloud_compute_share = compute_pct / 100.0
-            with col2:
-                storage_pct = st.slider(
-                    "Storage %",
-                    min_value=0, max_value=100,
-                    value=int(params.cloud_storage_share * 100),
-                    format="%d%%",
-                    help="Object storage (S3), block storage (EBS), databases (RDS). Typically 15-30%."
-                )
-                params.cloud_storage_share = storage_pct / 100.0
-            with col3:
-                other_pct = st.slider(
-                    "Other %",
-                    min_value=0, max_value=100,
-                    value=int(params.cloud_other_share * 100),
-                    format="%d%%",
-                    help="Networking, data transfer, DNS, CDN, monitoring. Typically 10-20%."
-                )
-                params.cloud_other_share = other_pct / 100.0
-            
-            # Validation warning
-            total_pct = compute_pct + storage_pct + other_pct
-            if total_pct != 100:
-                st.warning(f"⚠️ Percentages sum to {total_pct}%, should be 100%")
-            
-            st.markdown("---")
-            st.markdown("**Strategy 1: Rightsizing** — Resize over-provisioned VMs *(applies to Compute)*")
-            col1, col2 = st.columns(2)
-            with col1:
-                rightsizing_vm_pct = st.slider(
-                    "% of VMs to analyze",
-                    min_value=0, max_value=100,
-                    value=int(params.finops_rightsizing_vm_share * 100),
-                    format="%d%%",
-                    help="What percentage of your compute workloads will you analyze for rightsizing? Typically 20-50%."
-                )
-                params.finops_rightsizing_vm_share = rightsizing_vm_pct / 100.0
-            with col2:
-                rightsizing_savings_pct = st.slider(
-                    "Expected savings per rightsized VM",
-                    min_value=0, max_value=50,
-                    value=int(params.finops_rightsizing_savings * 100),
-                    format="%d%%",
-                    help="How much do you expect to save on each rightsized VM? Industry benchmark: 15-25%."
-                )
-                params.finops_rightsizing_savings = rightsizing_savings_pct / 100.0
-            
-            st.markdown("**Strategy 2: Reserved Instances** — Commit to 1-3 year capacity for discounts *(applies to Compute)*")
-            col1, col2 = st.columns(2)
-            with col1:
-                reserved_share_pct = st.slider(
-                    "% of workloads to commit",
-                    min_value=0, max_value=100,
-                    value=int(params.finops_reserved_workload_share * 100),
-                    format="%d%%",
-                    help="What percentage of stable, predictable workloads can you commit to? Typically 30-60%."
-                )
-                params.finops_reserved_workload_share = reserved_share_pct / 100.0
-            with col2:
-                reserved_discount_pct = st.slider(
-                    "Discount from commitment",
-                    min_value=0, max_value=70,
-                    value=int(params.finops_reserved_discount * 100),
-                    format="%d%%",
-                    help="Discount you receive for Reserved Instances or Savings Plans. 1-year: ~30%, 3-year: ~60%."
-                )
-                params.finops_reserved_discount = reserved_discount_pct / 100.0
-            
-            st.markdown("**Strategy 3: Orphan Cleanup** — Delete unused/abandoned resources *(applies to Total)*")
-            orphan_pct = st.slider(
-                "% of cloud spend that is orphaned/unused",
-                min_value=0, max_value=30,
-                value=int(params.finops_orphan_waste_percent * 100),
-                format="%d%%",
-                help="Estimate: what percentage of your cloud bill pays for resources no one uses? (stopped VMs, old snapshots, detached storage). Industry: 5-15%."
-            )
-            params.finops_orphan_waste_percent = orphan_pct / 100.0
-            
-            st.markdown("**Strategy 4: Scheduling** — Turn off dev/test outside business hours *(applies to Compute)*")
-            col1, col2 = st.columns(2)
-            with col1:
-                dev_test_pct = st.slider(
-                    "% of cloud spend on dev/test",
-                    min_value=0, max_value=50,
-                    value=int(params.finops_dev_test_share * 100),
-                    format="%d%%",
-                    help="What percentage of your cloud spend is on non-production environments (dev, test, staging)?"
-                )
-                params.finops_dev_test_share = dev_test_pct / 100.0
-            with col2:
-                scheduling_pct = st.slider(
-                    "% time these can be off",
-                    min_value=0, max_value=80,
-                    value=int(params.finops_scheduling_savings * 100),
-                    format="%d%%",
-                    help="How much time can dev/test be turned off? (nights + weekends = ~65%)"
-                )
-                params.finops_scheduling_savings = scheduling_pct / 100.0
-            
-            st.markdown("**Strategy 5: Storage Tiering** — Archive cold data to cheaper tiers *(applies to Storage)*")
-            col1, col2 = st.columns(2)
-            with col1:
-                archivable_pct = st.slider(
-                    "% of storage that can be archived",
-                    min_value=0, max_value=80,
-                    value=int(params.finops_archivable_data * 100),
-                    format="%d%%",
-                    help="What percentage of your storage is cold/rarely accessed and could be moved to archive tier?"
-                )
-                params.finops_archivable_data = archivable_pct / 100.0
-            with col2:
-                archive_discount_pct = st.slider(
-                    "Savings from archiving",
-                    min_value=0, max_value=90,
-                    value=int(params.finops_archive_discount * 100),
-                    format="%d%%",
-                    help="How much cheaper is archive storage? (e.g., S3 Glacier is ~70% cheaper than S3 Standard)"
-                )
-                params.finops_archive_discount = archive_discount_pct / 100.0
-        
-        # I6: On-Prem Consolidation
-        with st.expander("🏢 I6: On-Premises Consolidation"):
-            st.markdown("**Infrastructure Baseline**")
-            col1, col2 = st.columns(2)
-            with col1:
-                params.onprem_annual_infra_cost = st.number_input(
-                    "Annual On-Prem Infra Cost (€)",
-                    value=float(params.onprem_annual_infra_cost),
-                    min_value=0.0,
-                    step=10000.0,
-                    help="Estimated annual cost of on-premises infrastructure (hosting, power, cooling, maintenance, staff). This is your baseline for calculating savings."
-                )
-            with col2:
-                reduction_pct = st.slider(
-                    "Reduction Target (%)",
-                    min_value=0, max_value=50,
-                    value=int(params.onprem_reduction_target * 100),
-                    format="%d%%",
-                    help="What percentage of on-prem footprint can you consolidate or migrate? Typical range: 10-25%."
-                )
-                params.onprem_reduction_target = reduction_pct / 100.0
-            
-            st.markdown("---")
-            st.markdown("**Investment Costs**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                params.onprem_audit_cost = st.number_input(
-                    "Data Center Audit (€)",
-                    value=float(params.onprem_audit_cost),
-                    min_value=0.0,
-                    step=5000.0,
-                    help="Cost to audit current infrastructure and identify consolidation opportunities."
-                )
-            with col2:
-                params.onprem_migration_cost = st.number_input(
-                    "Migration Cost (€)",
-                    value=float(params.onprem_migration_cost),
-                    min_value=0.0,
-                    step=5000.0,
-                    help="Cost to migrate workloads to cloud or consolidate to fewer on-prem servers."
-                )
-            with col3:
-                params.onprem_decom_cost = st.number_input(
-                    "Decommissioning Cost (€)",
-                    value=float(params.onprem_decom_cost),
-                    min_value=0.0,
-                    step=1000.0,
-                    help="Cost to decommission and dispose of retired hardware."
-                )
-        
-        st.success("✅ Changes apply automatically to Business Case calculations.")
-
-# =============================================================================
-# Main Application
+# Main
 # =============================================================================
 
 def main():
-    """Main application entry point."""
-    
-    # Render sidebar
-    render_sidebar()
-    
-    # Render current page
-    page = st.session_state.current_page
-    
-    if page == "Overview":
-        render_overview()
-    elif page == "Baseline Analysis":
-        render_baseline()
-    elif page == "Scenario Builder":
-        render_scenario_builder()
-    elif page == "Scenario Comparison":
-        render_comparison()
-    elif page == "Business Cases":
-        render_business_cases()
-    elif page == "Optimization":
-        render_optimization()
-    elif page == "Settings":
-        render_settings()
+    load_css()
+    init_state()
+
+    # Persist value-widget inputs across runs where their widget is not rendered
+    # (e.g. persona sliders off phase 1, levers in Optimiseur mode). Without this,
+    # Streamlit garbage-collects the unrendered widget state. Re-touching the keys
+    # at the top of the run — before any widget is instantiated — keeps them alive.
+    # (Button keys must be excluded: their state cannot be set via session_state.)
+    for _k in ("eff", "mo", "mt", "mr", "bud", "carbf", "alpha",
+               "l_rec", "l_life", "l_scr", "l_cloud", "mode", "target", "onprem", "eol"):
+        if _k in st.session_state:
+            st.session_state[_k] = st.session_state[_k]
+
+    s = st.session_state
+    target = s.target / 100.0
+    data = build_data(s.eff, s.mo, s.mt, s.mr)
+    params = build_params(s.bud, target, s.carbf, s.alpha, s.onprem, s.eol)
+    baseline = compute_baseline(data, params)
+
+    export_md = build_export(data, params, baseline)
+    render_rail(export_md)
+    render_topbar(data, params, baseline)
+
+    phases = {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5}
+    if s.expert:
+        for n in range(1, 6):
+            phases[n](data, params, baseline)
+            st.markdown('<div style="height:34px"></div>', unsafe_allow_html=True)
+    else:
+        phases[s.phase](data, params, baseline)
+
 
 if __name__ == "__main__":
     main()

@@ -43,12 +43,27 @@ The app will open automatically in your browser at **http://localhost:8501**.
 - **`assets/`**: LVMH-branded styling (CSS)
 - **`docs/`**: Detailed documentation
 
-## Features
+## The decision journey
 
-1. **Baseline Analysis**: Visualize current IT footprint (TCO + CO₂)
-2. **Scenario Builder**: Model initiatives like laptop lifespan extension
-3. **Business Business**: AI-prioritized "Must Do" vs "Nice to Do" list
-4. **Optimization**: Find the mathematical optimum for budget/targets
+The app is organised as a five-step *parcours de décision*, with a persistent
+**Green ROI arbitrage gauge** (`Green ROI = α · Finance + (1 − α) · Carbone`) that
+reacts live to every adjustment:
+
+1. **Cadrer** — frame the Maison: pick a preset or set headcount and the
+   Office / Tech / Retail persona split; the target inventory and budget update instantly.
+2. **Diagnostiquer** — the reference situation: TCO and carbon KPIs, cost &
+   emissions breakdowns, and the detailed equipment inventory.
+3. **Explorer** — build scenarios manually (four levers) or let the optimiser
+   sweep ~4 800 configurations and surface a diverse, constraint-compliant Top 5.
+4. **Arbitrer** — compare on the Green ROI frontier (savings × CO₂ reduction),
+   read the recommendation, and review the side-by-side table.
+5. **Planifier** — turn the decision into a 2026 roadmap: deployment gantt,
+   gain/risk prioritisation, and COMEX-ready project sheets.
+
+Every figure is computed by the engine in `src/` — baseline, scenarios, ROI,
+optimiser and business cases. Use the sidebar **Réglages & facteurs** to tune the
+carbon target and on-prem baseline, **Exporter le dossier** for a Markdown summary,
+and **Mode expert** to view all five phases at once.
 
 ---
 
