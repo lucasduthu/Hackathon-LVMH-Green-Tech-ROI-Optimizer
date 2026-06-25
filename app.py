@@ -12,6 +12,7 @@ business cases. Nothing here is illustrative: every figure comes from the engine
     Green ROI = α · Finance + (1 − α) · Carbone
 """
 
+
 import copy
 import sys
 import re

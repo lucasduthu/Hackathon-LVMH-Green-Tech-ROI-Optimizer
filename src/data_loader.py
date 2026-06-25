@@ -8,6 +8,7 @@ This module handles:
 - Creation of default Excel file from captured data
 """
 
+
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field

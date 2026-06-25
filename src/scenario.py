@@ -9,6 +9,7 @@ This module handles scenario calculations for 2026 projections:
 - Power management improvements
 """
 
+
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 from .data_loader import EquipmentData, get_equipment_lifespan, get_equipment_price

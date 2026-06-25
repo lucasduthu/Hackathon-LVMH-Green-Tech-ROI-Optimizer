@@ -9,6 +9,7 @@ This module computes the baseline (current state) metrics:
 - Total TCO and carbon footprint
 """
 
+
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 from .data_loader import EquipmentData, get_equipment_lifespan

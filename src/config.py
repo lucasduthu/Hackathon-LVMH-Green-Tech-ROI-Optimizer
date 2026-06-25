@@ -10,6 +10,7 @@ Note: ADEME factors are approximate values based on public data.
 Users can edit these in the application UI or load from external file.
 """
 
+
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 

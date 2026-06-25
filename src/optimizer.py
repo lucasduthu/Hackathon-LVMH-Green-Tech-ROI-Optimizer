@@ -8,6 +8,7 @@ This module provides:
 - Initiative-level marginal contribution analysis
 """
 
+
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional, Generator
 from itertools import product
