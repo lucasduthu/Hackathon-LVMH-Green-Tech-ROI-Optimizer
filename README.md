@@ -4,6 +4,7 @@
 > performance financière et impact carbone de son parc IT, et à transformer cet
 > arbitrage en **feuille de route**.
 
+
 ---
 
 ## Sommaire
@@ -84,12 +85,18 @@ en déduit l'**inventaire cible** : un poste Office a un écran, un poste Tech e
 (double écran), le Retail est « mobile seul ». Budget et intensité carbone de l'électricité
 se règlent ici.
 
+![Phase 1 — Cadrer](assets/01_cadrer.png)
+
+
 **Phase 2 — Diagnostiquer** · *où en sommes-nous ?*
 Une photographie du parc actuel : **TCO**, **empreinte carbone** et **volume** en chiffres
 clés ; deux anneaux montrant la **structure des coûts** (Capex / Cloud / Énergie) et la
 **répartition des émissions** (Fabrication / Usage / Cloud & On-Prem) ; un **inventaire
 détaillé**. Le but est de repérer les **postes de coûts** et les **gisements de CO₂** avant
 d'agir.
+
+![Phase 2 — Diagnostiquer](assets/02_diagnostic.png)
+
 
 **Phase 3 — Explorer** · *construire des scénarios.*
 Deux façons de travailler :
@@ -101,17 +108,26 @@ Deux façons de travailler :
   celles qui respectent budget **et** cible, et propose un **Top 5** de stratégies
   distinctes classées par Green ROI.
 
+![Phase 3 — Explorer](assets/03_explorer.png)
+
+
 **Phase 4 — Arbitrer** · *comparer et choisir.*
 La **frontière d'arbitrage** place chaque scénario sur un plan « économies × réduction
 CO₂ » (le meilleur est en haut à droite, la taille de la bulle est son Green ROI). Une
 **carte de recommandation** désigne le scénario retenu et un **tableau comparatif** met en
 regard Baseline, Modéré, Agressif, Manuel et Optimisé, avec le respect des contraintes.
 
+![Phase 4 — Arbitrer](assets/04_arbitrer.png)
+
+
 **Phase 5 — Planifier** · *passer à l'action.*
 Le scénario retenu devient une **roadmap 2026** : calendrier de déploiement (gantt
 trimestriel), **priorisation gain/risque** (Must do / Should do / Consider) et **fiches
 projet** prêtes pour le COMEX (VAN, investissement, CO₂ évité, étapes, responsables,
 risques et remédiations).
+
+![Phase 5 — Planifier](assets/05_planifier.png)
+
 
 ### En complément
 
